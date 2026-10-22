@@ -9,7 +9,12 @@ inference platform running open-weight models on a Framework Desktop. It install
 > WebUI is created by Timothy Jaeryang Baek and the Open WebUI contributors; their work is the
 > foundation of everything here. What Aaru changed is listed in [`AARU.md`](AARU.md).
 
-![Aaru web app](https://raw.githubusercontent.com/CorpLynx/aaru/main/docs/screenshots/web-chat.png)
+<table>
+  <tr>
+    <td width="70%"><img src="docs/screenshots/web-chat.png" alt="Aaru web app: a chat"></td>
+    <td width="30%"><img src="docs/screenshots/mobile-chat.png" alt="Aaru web app on a phone, installed as a PWA"></td>
+  </tr>
+</table>
 
 ## What Aaru changes
 
