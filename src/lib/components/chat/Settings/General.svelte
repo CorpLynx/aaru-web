@@ -184,7 +184,7 @@
 				metaThemeColor.setAttribute(
 					'content',
 					_theme === 'dark'
-						? '#171717'
+						? '#050607' // AARU: Ink 950
 						: _theme === 'oled-dark'
 							? '#000000'
 							: _theme === 'her'
@@ -236,13 +236,9 @@
 					placeholder={$i18n.t('Select a theme')}
 					on:change={() => themeChangeHandler(selectedTheme)}
 				>
-					<option value="system">⚙️ {$i18n.t('System')}</option>
-					<option value="dark">🌑 {$i18n.t('Dark')}</option>
-					<option value="oled-dark">🌃 {$i18n.t('OLED Dark')}</option>
-					<option value="light">☀️ {$i18n.t('Light')}</option>
-					{#if $config?.features?.enable_easter_eggs}
-						<option value="her">🌷 Her</option>
-					{/if}
+					<!-- AARU: dark only; no light, system or "her" themes -->
+					<option value="dark">{$i18n.t('Dark')}</option>
+					<option value="oled-dark">{$i18n.t('OLED Dark')}</option>
 				</SettingsSelect>
 			</UserSettingRow>
 

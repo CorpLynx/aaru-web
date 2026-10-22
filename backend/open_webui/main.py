@@ -2987,10 +2987,12 @@ async def get_manifest_json():
         return {
             'name': app.state.WEBUI_NAME,
             'short_name': app.state.WEBUI_NAME,
-            'description': f'{app.state.WEBUI_NAME} is an open, extensible, user-friendly interface for AI that adapts to your workflow.',
+            # AARU: product copy and Ink 950 background
+            'description': f'{app.state.WEBUI_NAME} runs open-weight models on its own hardware.',
             'start_url': '/',
             'display': 'standalone',
-            'background_color': '#343541',
+            'background_color': '#050607',
+            'theme_color': '#050607',
             'icons': [
                 # LICENSE covers this Open WebUI install icon.
                 # Do not alter, remove, obscure, or replace it except as LICENSE permits:

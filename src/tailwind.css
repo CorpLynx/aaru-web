@@ -1,4 +1,6 @@
 @import 'tailwindcss';
+/* AARU: tokens, fonts and gray-scale mapping */
+@import './lib/aaru/theme.css';
 
 @config '../tailwind.config.js';
 

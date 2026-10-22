@@ -32,7 +32,7 @@
 			name="viewport"
 			content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
 		/>
-		<meta name="theme-color" content="#171717" />
+		<meta name="theme-color" content="#050607" />
 		<meta name="robots" content="noindex,nofollow" />
 
 		<script src="/static/loader.js" defer crossorigin="use-credentials"></script>
@@ -50,8 +50,9 @@
 				const metaThemeColorTag = document.querySelector('meta[name="theme-color"]');
 				const prefersDarkTheme = window.matchMedia('(prefers-color-scheme: dark)').matches;
 
-				if (!localStorage?.theme) {
-					localStorage.theme = 'system';
+				// AARU: dark only. Light, system and "her" resolve to Aaru dark.
+				if (!['dark', 'oled-dark'].includes(localStorage?.theme)) {
+					localStorage.theme = 'dark';
 				}
 
 				if (localStorage.theme === 'system') {
@@ -72,15 +73,13 @@
 					metaThemeColorTag.setAttribute('content', '#983724');
 				} else {
 					document.documentElement.classList.add('dark');
-					metaThemeColorTag.setAttribute('content', '#171717');
+					metaThemeColorTag.setAttribute('content', '#050607'); // AARU: Ink 950
 				}
 
 				// LICENSE covers these Open WebUI splash logo assets.
 				// Do not alter, remove, obscure, or replace them except as LICENSE permits:
 				// https://docs.openwebui.com/license.
-				const preloadHref = document.documentElement.classList.contains('dark')
-					? '/static/splash-dark.png'
-					: '/static/splash.png';
+				const preloadHref = '/static/aaru-mark-animated.svg'; // AARU: animated splash mark
 				const preload = document.createElement('link');
 				preload.rel = 'preload';
 				preload.as = 'image';
@@ -101,8 +100,6 @@
 						}
 					}
 				});
-				const isDarkMode = document.documentElement.classList.contains('dark');
-
 				const logo = document.createElement('img');
 				logo.id = 'logo';
 				logo.style =
@@ -112,7 +109,7 @@
 				// LICENSE covers this Open WebUI splash logo.
 				// Do not alter, remove, obscure, or replace it except as LICENSE permits:
 				// https://docs.openwebui.com/license.
-				logo.src = isDarkMode ? '/static/splash-dark.png' : '/static/splash.png';
+				logo.src = '/static/aaru-mark-animated.svg'; // AARU: animated splash mark
 
 				document.addEventListener('DOMContentLoaded', function () {
 					const splash = document.getElementById('splash-screen');
@@ -125,7 +122,7 @@
 			})();
 		</script>
 
-		<title>Open WebUI</title>
+		<title>Aaru</title>
 
 		%sveltekit.head%
 	</head>
@@ -160,13 +157,13 @@
 				<!-- LICENSE covers this Open WebUI splash logo.
 				Do not alter, remove, obscure, or replace it except as LICENSE permits:
 				https://docs.openwebui.com/license. -->
+				<!-- AARU: animated splash mark, no pulse class -->
 				<img
 					id="logo-her"
 					style="width: auto; height: 13rem"
-					src="/static/splash.png"
+					src="/static/aaru-mark-animated.svg"
 					loading="eager"
 					fetchpriority="high"
-					class="animate-pulse-fast"
 				/>
 
 				<div style="position: relative; width: 24rem; margin-top: 0.5rem">
@@ -209,7 +206,7 @@
 		}
 
 		#splash-screen {
-			background: #fff;
+			background: #000; /* AARU: OLED black splash */
 		}
 
 		html.dark #splash-screen {
