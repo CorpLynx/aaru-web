@@ -61,6 +61,24 @@ Token names are prefixed `--aaru-*` in this codebase. The handoff's unprefixed n
 (`--radius-lg`, `--font-sans`, `--ease-out`, `--text-*`) are Tailwind v4 theme variables and would
 restyle stock components.
 
+### No cloud or frontier models
+
+Removed provider-specific code; OpenAI-compatible endpoints and local engines remain.
+
+| Area             | Removed                                                                                                                                                                                      | Remains                                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Chat connections | Azure OpenAI mode, Entra ID auth, `api.anthropic.com` connections, OpenAI model filtering and o-series payload handling, `/openai/audio/speech`, cloud URL suggestions                       | OpenAI-compatible connections, Ollama, the Anthropic Messages format adapter (passes through to LiteLLM) |
+| Speech           | Azure, ElevenLabs, Deepgram and Mistral engines; OpenAI Realtime voice calls (`routers/audio/realtime.py`, `utils/realtime.ts`, `BridgeCallOverlay.svelte`); OpenAI model and voice defaults | Local Whisper, Web Speech API, Transformers, OpenAI-compatible TTS/STT, the standard voice call overlay  |
+| Embeddings       | Azure OpenAI engine                                                                                                                                                                          | SentenceTransformers, Ollama, OpenAI-compatible                                                          |
+| Images           | Gemini engine, Azure `api-version`, DALL·E and GPT-Image model list                                                                                                                          | ComfyUI, Automatic1111, OpenAI-compatible (lists the server's own models)                                |
+| Documents        | Azure Document Intelligence, Mistral OCR                                                                                                                                                     | Tika, Docling, MinerU, PaddleOCR-VL, local loaders                                                       |
+| Config           | `api.openai.com` defaults; `audio.tts.api_key`                                                                                                                                               | Engine defaults follow the first configured connection                                                   |
+| Dependencies     | `anthropic`, `azure-ai-documentintelligence`                                                                                                                                                 | `openai` (generic client), `azure-identity` (Azure Blob storage, Azure AI Search)                        |
+
+Not changed: web search providers (search services, not models), Azure Blob and GCS storage, the
+ChatGPT history importer, and database migrations. The "What's new" dialog still shows upstream's
+`CHANGELOG.md`, which describes removed features.
+
 ## Building
 
 ### Deployable image
