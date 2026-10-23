@@ -521,20 +521,12 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
             (
                 config['rag.openai.api_base_url']
                 if config['rag.embedding_engine'] == 'openai'
-                else (
-                    config['rag.ollama.base_url']
-                    if config['rag.embedding_engine'] == 'ollama'
-                    else ''
-                )
+                else (config['rag.ollama.base_url'] if config['rag.embedding_engine'] == 'ollama' else '')
             ),
             (
                 config['rag.openai.api_key']
                 if config['rag.embedding_engine'] == 'openai'
-                else (
-                    config['rag.ollama.api_key']
-                    if config['rag.embedding_engine'] == 'ollama'
-                    else ''
-                )
+                else (config['rag.ollama.api_key'] if config['rag.embedding_engine'] == 'ollama' else '')
             ),
             config['rag.embedding_batch_size'],
             enable_async=config['rag.enable_async_embedding'],
@@ -1446,20 +1438,12 @@ def save_docs_to_vector_db(
             (
                 config['rag.openai.api_base_url']
                 if config['rag.embedding_engine'] == 'openai'
-                else (
-                    config['rag.ollama.base_url']
-                    if config['rag.embedding_engine'] == 'ollama'
-                    else ''
-                )
+                else (config['rag.ollama.base_url'] if config['rag.embedding_engine'] == 'ollama' else '')
             ),
             (
                 config['rag.openai.api_key']
                 if config['rag.embedding_engine'] == 'openai'
-                else (
-                    config['rag.ollama.api_key']
-                    if config['rag.embedding_engine'] == 'ollama'
-                    else ''
-                )
+                else (config['rag.ollama.api_key'] if config['rag.embedding_engine'] == 'ollama' else '')
             ),
             config['rag.embedding_batch_size'],
             enable_async=config['rag.enable_async_embedding'],

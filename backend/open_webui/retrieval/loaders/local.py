@@ -94,4 +94,3 @@ class UnstructuredLoader:
                 for element in elements
             ]
         return [Document(page_content='\n\n'.join(map(str, elements)), metadata=metadata)]
-

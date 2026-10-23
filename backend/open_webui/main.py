@@ -751,20 +751,12 @@ async def initialize_runtime_config(app: FastAPI):
         url=(
             rag_config.get('rag.openai.api_base_url')
             if embedding_engine == 'openai'
-            else (
-                rag_config.get('rag.ollama.base_url')
-                if embedding_engine == 'ollama'
-                else ''
-            )
+            else (rag_config.get('rag.ollama.base_url') if embedding_engine == 'ollama' else '')
         ),
         key=(
             rag_config.get('rag.openai.api_key')
             if embedding_engine == 'openai'
-            else (
-                rag_config.get('rag.ollama.api_key')
-                if embedding_engine == 'ollama'
-                else ''
-            )
+            else (rag_config.get('rag.ollama.api_key') if embedding_engine == 'ollama' else '')
         ),
         embedding_batch_size=rag_config.get('rag.embedding_batch_size'),
         enable_async=rag_config.get('rag.enable_async_embedding'),
