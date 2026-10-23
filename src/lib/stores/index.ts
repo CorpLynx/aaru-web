@@ -353,7 +353,6 @@ type Document = {
 
 type Config = {
 	audio?: {
-		realtime?: { enabled: boolean; model: string; voice: string };
 		stt: { engine: string };
 		tts: { engine: string; voice: string; split_on: string };
 	};

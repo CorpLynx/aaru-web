@@ -74,7 +74,6 @@ IMAGE_CONFIG_KEYS = {
     'IMAGE_STEPS': 'image_generation.steps',
     'IMAGES_OPENAI_API_BASE_URL': 'image_generation.openai.api_base_url',
     'IMAGES_OPENAI_API_KEY': 'image_generation.openai.api_key',
-    'IMAGES_OPENAI_API_VERSION': 'image_generation.openai.api_version',
     'IMAGES_OPENAI_API_PARAMS': 'image_generation.openai.params',
     'AUTOMATIC1111_BASE_URL': 'image_generation.automatic1111.base_url',
     'AUTOMATIC1111_API_AUTH': 'image_generation.automatic1111.api_auth',
@@ -83,18 +82,12 @@ IMAGE_CONFIG_KEYS = {
     'COMFYUI_API_KEY': 'image_generation.comfyui.api_key',
     'COMFYUI_WORKFLOW': 'image_generation.comfyui.workflow',
     'COMFYUI_WORKFLOW_NODES': 'image_generation.comfyui.nodes',
-    'IMAGES_GEMINI_API_BASE_URL': 'image_generation.gemini.api_base_url',
-    'IMAGES_GEMINI_API_KEY': 'image_generation.gemini.api_key',
-    'IMAGES_GEMINI_ENDPOINT_METHOD': 'image_generation.gemini.endpoint_method',
     'ENABLE_IMAGE_EDIT': 'images.edit.enable',
     'IMAGE_EDIT_ENGINE': 'images.edit.engine',
     'IMAGE_EDIT_MODEL': 'images.edit.model',
     'IMAGE_EDIT_SIZE': 'images.edit.size',
     'IMAGES_EDIT_OPENAI_API_BASE_URL': 'images.edit.openai.api_base_url',
     'IMAGES_EDIT_OPENAI_API_KEY': 'images.edit.openai.api_key',
-    'IMAGES_EDIT_OPENAI_API_VERSION': 'images.edit.openai.api_version',
-    'IMAGES_EDIT_GEMINI_API_BASE_URL': 'images.edit.gemini.api_base_url',
-    'IMAGES_EDIT_GEMINI_API_KEY': 'images.edit.gemini.api_key',
     'IMAGES_EDIT_COMFYUI_BASE_URL': 'images.edit.comfyui.base_url',
     'IMAGES_EDIT_COMFYUI_API_KEY': 'images.edit.comfyui.api_key',
     'IMAGES_EDIT_COMFYUI_WORKFLOW': 'images.edit.comfyui.workflow',
@@ -203,9 +196,7 @@ async def set_image_model(request: Request, model: str):
 async def get_image_model(request):
     image_config = await get_image_config()
     if image_config.IMAGE_GENERATION_ENGINE == 'openai':
-        return image_config.IMAGE_GENERATION_MODEL if image_config.IMAGE_GENERATION_MODEL else 'dall-e-2'
-    elif image_config.IMAGE_GENERATION_ENGINE == 'gemini':
-        return image_config.IMAGE_GENERATION_MODEL if image_config.IMAGE_GENERATION_MODEL else 'imagen-3.0-generate-002'
+        return image_config.IMAGE_GENERATION_MODEL or ''
     elif image_config.IMAGE_GENERATION_ENGINE == 'comfyui':
         return image_config.IMAGE_GENERATION_MODEL if image_config.IMAGE_GENERATION_MODEL else ''
     elif image_config.IMAGE_GENERATION_ENGINE == 'automatic1111' or image_config.IMAGE_GENERATION_ENGINE == '':
@@ -237,7 +228,6 @@ class ImagesConfig(BaseModel):
 
     IMAGES_OPENAI_API_BASE_URL: str
     IMAGES_OPENAI_API_KEY: str
-    IMAGES_OPENAI_API_VERSION: str
     IMAGES_OPENAI_API_PARAMS: dict | str | None
 
     AUTOMATIC1111_BASE_URL: str
@@ -249,10 +239,6 @@ class ImagesConfig(BaseModel):
     COMFYUI_WORKFLOW: str
     COMFYUI_WORKFLOW_NODES: list[dict]
 
-    IMAGES_GEMINI_API_BASE_URL: str
-    IMAGES_GEMINI_API_KEY: str
-    IMAGES_GEMINI_ENDPOINT_METHOD: str
-
     ENABLE_IMAGE_EDIT: bool
     IMAGE_EDIT_ENGINE: str
     IMAGE_EDIT_MODEL: str
@@ -260,9 +246,6 @@ class ImagesConfig(BaseModel):
 
     IMAGES_EDIT_OPENAI_API_BASE_URL: str
     IMAGES_EDIT_OPENAI_API_KEY: str
-    IMAGES_EDIT_OPENAI_API_VERSION: str
-    IMAGES_EDIT_GEMINI_API_BASE_URL: str
-    IMAGES_EDIT_GEMINI_API_KEY: str
     IMAGES_EDIT_COMFYUI_BASE_URL: str
     IMAGES_EDIT_COMFYUI_API_KEY: str
     IMAGES_EDIT_COMFYUI_WORKFLOW: str
@@ -365,16 +348,16 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
     image_config = await get_image_config()
     try:
         if image_config.IMAGE_GENERATION_ENGINE == 'openai':
-            return [
-                {'id': 'dall-e-2', 'name': 'DALL·E 2'},
-                {'id': 'dall-e-3', 'name': 'DALL·E 3'},
-                {'id': 'gpt-image-1', 'name': 'GPT-IMAGE 1'},
-                {'id': 'gpt-image-1.5', 'name': 'GPT-IMAGE 1.5'},
-            ]
-        elif image_config.IMAGE_GENERATION_ENGINE == 'gemini':
-            return [
-                {'id': 'imagen-3.0-generate-002', 'name': 'imagen-3.0 generate-002'},
-            ]
+            # AARU: list what the configured OpenAI-compatible server offers.
+            session = await get_session()
+            async with session.get(
+                url=f'{image_config.IMAGES_OPENAI_API_BASE_URL}/models',
+                headers={'Authorization': f'Bearer {image_config.IMAGES_OPENAI_API_KEY}'},
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as r:
+                r.raise_for_status()
+                res = await r.json(content_type=None)
+            return [{'id': m['id'], 'name': m.get('name', m['id'])} for m in res.get('data', []) if m.get('id')]
         elif image_config.IMAGE_GENERATION_ENGINE == 'comfyui':
             # TODO - get models from comfyui
             headers = {'Authorization': f'Bearer {image_config.COMFYUI_API_KEY}'}
@@ -634,8 +617,6 @@ async def image_generations(
                 headers = include_user_info_headers(headers, user)
 
             url = f'{image_config.IMAGES_OPENAI_API_BASE_URL}/images/generations'
-            if image_config.IMAGES_OPENAI_API_VERSION:
-                url = f'{url}?api-version={image_config.IMAGES_OPENAI_API_VERSION}'
 
             data = {
                 'model': model,
@@ -648,10 +629,8 @@ async def image_generations(
                 ),
                 **(
                     {}
-                    if re.match(
-                        IMAGE_URL_RESPONSE_MODELS_REGEX_PATTERN,
-                        image_config.IMAGE_GENERATION_MODEL,
-                    )
+                    if IMAGE_URL_RESPONSE_MODELS_REGEX_PATTERN
+                    and re.match(IMAGE_URL_RESPONSE_MODELS_REGEX_PATTERN, image_config.IMAGE_GENERATION_MODEL)
                     else {'response_format': 'b64_json'}
                 ),
                 **({} if not image_config.IMAGES_OPENAI_API_PARAMS else image_config.IMAGES_OPENAI_API_PARAMS),
@@ -682,64 +661,6 @@ async def image_generations(
 
                 _, image_file = await upload_image(request, image_data, content_type, {**data, **metadata}, user)
                 images.append(image_file)
-            return images
-
-        elif image_config.IMAGE_GENERATION_ENGINE == 'gemini':
-            headers = {
-                'Content-Type': 'application/json',
-                'x-goog-api-key': image_config.IMAGES_GEMINI_API_KEY,
-            }
-
-            data = {}
-
-            if (
-                image_config.IMAGES_GEMINI_ENDPOINT_METHOD == ''
-                or image_config.IMAGES_GEMINI_ENDPOINT_METHOD == 'predict'
-            ):
-                model = f'{model}:predict'
-                data = {
-                    'instances': {'prompt': form_data.prompt},
-                    'parameters': {
-                        'sampleCount': form_data.n,
-                        'outputOptions': {'mimeType': 'image/png'},
-                    },
-                }
-
-            elif image_config.IMAGES_GEMINI_ENDPOINT_METHOD == 'generateContent':
-                model = f'{model}:generateContent'
-                data = {'contents': [{'parts': [{'text': form_data.prompt}]}]}
-
-            session = await get_session()
-            async with session.post(
-                url=f'{image_config.IMAGES_GEMINI_API_BASE_URL}/models/{model}',
-                json=data,
-                headers=headers,
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            ) as r:
-                r.raise_for_status()
-                res = await r.json(content_type=None)
-
-            images = []
-
-            if model.endswith(':predict'):
-                for image in res['predictions']:
-                    image_data, content_type = await get_image_data(image['bytesBase64Encoded'])
-                    _, image_file = await upload_image(request, image_data, content_type, {**data, **metadata}, user)
-                    images.append(image_file)
-            elif model.endswith(':generateContent'):
-                for image in res['candidates']:
-                    for part in image['content']['parts']:
-                        if part.get('inlineData', {}).get('data'):
-                            image_data, content_type = await get_image_data(part['inlineData']['data'])
-                            _, image_file = await upload_image(
-                                request,
-                                image_data,
-                                content_type,
-                                {**data, **metadata},
-                                user,
-                            )
-                            images.append(image_file)
-
             return images
 
         elif image_config.IMAGE_GENERATION_ENGINE == 'comfyui':
@@ -997,10 +918,8 @@ async def image_edits(
                 **({'background': form_data.background} if form_data.background else {}),
                 **(
                     {}
-                    if re.match(
-                        IMAGE_URL_RESPONSE_MODELS_REGEX_PATTERN,
-                        image_config.IMAGE_EDIT_MODEL,
-                    )
+                    if IMAGE_URL_RESPONSE_MODELS_REGEX_PATTERN
+                    and re.match(IMAGE_URL_RESPONSE_MODELS_REGEX_PATTERN, image_config.IMAGE_EDIT_MODEL)
                     else {'response_format': 'b64_json'}
                 ),
             }
@@ -1016,10 +935,6 @@ async def image_edits(
                     if ENABLE_OPENAI_IMAGE_EDIT_NORMALIZATION:
                         img = normalize_openai_edit_image_data_url(img)
                     files.append(get_image_file_item(img, 'image[]'))
-
-            url_search_params = ''
-            if image_config.IMAGES_EDIT_OPENAI_API_VERSION:
-                url_search_params += f'?api-version={image_config.IMAGES_EDIT_OPENAI_API_VERSION}'
 
             # Build multipart form data for aiohttp
             form = aiohttp.FormData()
@@ -1038,7 +953,7 @@ async def image_edits(
 
             session = await get_session()
             async with session.post(
-                url=f'{image_config.IMAGES_EDIT_OPENAI_API_BASE_URL}/images/edits{url_search_params}',
+                url=f'{image_config.IMAGES_EDIT_OPENAI_API_BASE_URL}/images/edits',
                 headers=headers,
                 data=form,
                 ssl=AIOHTTP_CLIENT_SESSION_SSL,
@@ -1060,63 +975,6 @@ async def image_edits(
 
                 _, image_file = await upload_image(request, image_data, content_type, {**data, **metadata}, user)
                 images.append(image_file)
-            return images
-
-        elif image_config.IMAGE_EDIT_ENGINE == 'gemini':
-            headers = {
-                'Content-Type': 'application/json',
-                'x-goog-api-key': image_config.IMAGES_EDIT_GEMINI_API_KEY,
-            }
-
-            model = f'{model}:generateContent'
-            data = {'contents': [{'parts': [{'text': form_data.prompt}]}]}
-
-            if isinstance(form_data.image, str):
-                data['contents'][0]['parts'].append(
-                    {
-                        'inline_data': {
-                            'mime_type': 'image/png',
-                            'data': form_data.image.split(',', 1)[1],
-                        }
-                    }
-                )
-            elif isinstance(form_data.image, list):
-                data['contents'][0]['parts'].extend(
-                    [
-                        {
-                            'inline_data': {
-                                'mime_type': 'image/png',
-                                'data': image.split(',', 1)[1],
-                            }
-                        }
-                        for image in form_data.image
-                    ]
-                )
-
-            session = await get_session()
-            async with session.post(
-                url=f'{image_config.IMAGES_EDIT_GEMINI_API_BASE_URL}/models/{model}',
-                json=data,
-                headers=headers,
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            ) as r:
-                r.raise_for_status()
-                res = await r.json(content_type=None)
-
-            images = []
-            for image in res['candidates']:
-                for part in image['content']['parts']:
-                    if part.get('inlineData', {}).get('data'):
-                        image_data, content_type = await get_image_data(part['inlineData']['data'])
-                        _, image_file = await upload_image(
-                            request,
-                            image_data,
-                            content_type,
-                            {**data, **metadata},
-                            user,
-                        )
-                        images.append(image_file)
-
             return images
 
         elif image_config.IMAGE_EDIT_ENGINE == 'comfyui':

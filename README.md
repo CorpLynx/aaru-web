@@ -23,8 +23,11 @@ inference platform running open-weight models on a Framework Desktop. It install
 - **Image pipeline:** `.github/workflows/aaru-image.yaml` builds one linux/amd64 image, runs it as a
   non-root user, blocks fixable critical and high Trivy findings, and publishes
   `ghcr.io/corplynx/aaru-web`.
-- **Planned:** removing cloud and frontier-model inference so the app talks only to Aaru's own
-  gateway, and the screens in the [design handoff](https://github.com/CorpLynx/aaru/tree/main/design).
+- **No cloud or frontier models:** support for Azure OpenAI, Anthropic, Gemini, ElevenLabs,
+  Deepgram, Mistral, Azure Speech and Document Intelligence, and OpenAI Realtime voice calls is
+  removed, along with every default pointing at `api.openai.com`. Chat, embeddings, speech and images
+  go through OpenAI-compatible endpoints (Aaru's LiteLLM gateway) or run locally.
+- **Planned:** the screens in the [design handoff](https://github.com/CorpLynx/aaru/tree/main/design).
 
 Deployment, the gateway, the model servers and the build specification live in
 [`CorpLynx/aaru`](https://github.com/CorpLynx/aaru).

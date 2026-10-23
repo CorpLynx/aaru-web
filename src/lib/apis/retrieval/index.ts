@@ -32,16 +32,9 @@ type ChunkConfigForm = {
 	chunk_overlap: number;
 };
 
-type DocumentIntelligenceConfigForm = {
-	key: string;
-	endpoint: string;
-	model: string;
-};
-
 type ContentExtractConfigForm = {
 	engine: string;
 	tika_server_url: string | null;
-	document_intelligence_config: DocumentIntelligenceConfigForm | null;
 };
 
 type YoutubeConfigForm = {
@@ -191,16 +184,9 @@ type OpenAIConfigForm = {
 
 type OllamaConfigForm = OpenAIConfigForm;
 
-type AzureOpenAIConfigForm = {
-	key: string;
-	url: string;
-	version: string;
-};
-
 type EmbeddingModelUpdateForm = {
 	openai_config?: OpenAIConfigForm;
 	ollama_config?: OllamaConfigForm;
-	azure_openai_config?: AzureOpenAIConfigForm;
 	RAG_EMBEDDING_ENGINE: string;
 	RAG_EMBEDDING_MODEL: string;
 	RAG_EMBEDDING_BATCH_SIZE?: number;

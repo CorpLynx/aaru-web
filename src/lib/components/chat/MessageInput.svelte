@@ -156,7 +156,6 @@
 	export let contextUsage = null;
 	export let contextCompactionEnabled = false;
 	export let embedded = false;
-	export let callActive = false;
 	export let callEnabled = true;
 
 	export let autoScroll = false;
@@ -2792,28 +2791,14 @@
 										{#if callEnabled && !embedded && prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
 											<div class=" flex items-center">
 												<!-- {$i18n.t('Call')} -->
-												<Tooltip
-													content={callActive ? $i18n.t('Call in progress') : $i18n.t('Voice mode')}
-												>
+												<Tooltip content={$i18n.t('Voice mode')}>
 													<button
 														class=" bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full p-[0.3125rem] self-center"
-														class:call-active={callActive}
 														type="button"
 														on:click={async () => {
-															if (callActive) {
-																showCallOverlay.set(true);
-																showControls.set(true);
-																return;
-															}
 															if (selectedModels.length > 1) {
 																toast.error($i18n.t('Select only one model to call'));
 
-																return;
-															}
-
-															if ($config?.audio?.realtime?.enabled) {
-																showCallOverlay.set(true);
-																showControls.set(true);
 																return;
 															}
 
@@ -2860,9 +2845,7 @@
 																);
 															}
 														}}
-														aria-label={callActive
-															? $i18n.t('Return to call')
-															: $i18n.t('Voice mode')}
+														aria-label={$i18n.t('Voice mode')}
 													>
 														<Voice className="size-5" strokeWidth="2.5" />
 													</button>
@@ -2923,15 +2906,4 @@
 {/if}
 
 <style>
-	.call-active {
-		box-shadow:
-			0 0 8px 2px rgb(0 0 0 / 0.25),
-			0 0 20px 4px rgb(0 0 0 / 0.15);
-	}
-
-	:global(.dark) .call-active {
-		box-shadow:
-			0 0 8px 2px rgb(255 255 255 / 0.4),
-			0 0 20px 4px rgb(255 255 255 / 0.25);
-	}
 </style>

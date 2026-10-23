@@ -221,9 +221,6 @@ async def get_headers_and_cookies(
         if oauth_token:
             token = f'{oauth_token.get("access_token", "")}'
 
-    elif auth_type in ('azure_ad', 'microsoft_entra_id'):
-        token = get_microsoft_entra_id_access_token()
-
     if token:
         headers['Authorization'] = f'Bearer {token}'
 
@@ -232,20 +229,3 @@ async def get_headers_and_cookies(
         headers.update(custom_headers)
 
     return headers, cookies
-
-
-def get_microsoft_entra_id_access_token():
-    """
-    Get Microsoft Entra ID access token using DefaultAzureCredential for Azure OpenAI.
-    Returns the token string or None if authentication fails.
-    """
-    from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-
-    try:
-        token_provider = get_bearer_token_provider(
-            DefaultAzureCredential(), 'https://cognitiveservices.azure.com/.default'
-        )
-        return token_provider()
-    except Exception as e:
-        log.error(f'Error getting Microsoft Entra ID access token: {e}')
-        return None

@@ -56,10 +56,6 @@
 	let OpenAIUrl = '';
 	let OpenAIKey = '';
 
-	let AzureOpenAIUrl = '';
-	let AzureOpenAIKey = '';
-	let AzureOpenAIVersion = '';
-
 	let OllamaUrl = '';
 	let OllamaKey = '';
 
@@ -106,14 +102,6 @@
 			return;
 		}
 
-		if (
-			RAG_EMBEDDING_ENGINE === 'azure_openai' &&
-			(AzureOpenAIKey === '' || AzureOpenAIUrl === '' || AzureOpenAIVersion === '')
-		) {
-			toast.error($i18n.t('OpenAI URL/Key required.'));
-			return;
-		}
-
 		console.debug('Update embedding model attempt:', {
 			RAG_EMBEDDING_ENGINE,
 			RAG_EMBEDDING_MODEL,
@@ -140,12 +128,6 @@
 			payload.openai_config = {
 				key: OpenAIKey,
 				url: OpenAIUrl
-			};
-		} else if (RAG_EMBEDDING_ENGINE === 'azure_openai') {
-			payload.azure_openai_config = {
-				key: AzureOpenAIKey,
-				url: AzureOpenAIUrl,
-				version: AzureOpenAIVersion
 			};
 		}
 
@@ -202,20 +184,6 @@
 			}
 		}
 
-		if (
-			RAGConfig.CONTENT_EXTRACTION_ENGINE === 'document_intelligence' &&
-			RAGConfig.DOCUMENT_INTELLIGENCE_ENDPOINT === ''
-		) {
-			toast.error($i18n.t('Document Intelligence endpoint required.'));
-			return;
-		}
-		if (
-			RAGConfig.CONTENT_EXTRACTION_ENGINE === 'mistral_ocr' &&
-			RAGConfig.MISTRAL_OCR_API_KEY === ''
-		) {
-			toast.error($i18n.t('Mistral OCR API Key required.'));
-			return;
-		}
 		if (
 			RAGConfig.CONTENT_EXTRACTION_ENGINE === 'paddleocr_vl' &&
 			RAGConfig.PADDLEOCR_VL_BASE_URL === ''
@@ -310,10 +278,6 @@
 
 			OllamaKey = embeddingConfig.ollama_config.key ?? '';
 			OllamaUrl = embeddingConfig.ollama_config.url ?? '';
-
-			AzureOpenAIKey = embeddingConfig.azure_openai_config.key ?? '';
-			AzureOpenAIUrl = embeddingConfig.azure_openai_config.url ?? '';
-			AzureOpenAIVersion = embeddingConfig.azure_openai_config.version ?? '';
 		}
 	};
 	onMount(async () => {
@@ -449,8 +413,6 @@
 						<option value="tika">{$i18n.t('Tika')}</option>
 						<option value="docling">{$i18n.t('Docling')}</option>
 						<option value="datalab_marker">{$i18n.t('Datalab Marker API')}</option>
-						<option value="document_intelligence">{$i18n.t('Document Intelligence')}</option>
-						<option value="mistral_ocr">{$i18n.t('Mistral OCR')}</option>
 						<option value="paddleocr_vl">{$i18n.t('PaddleOCR-vl')}</option>
 						<option value="mineru">{$i18n.t('MinerU')}</option>
 					</SettingsSelect>
@@ -720,71 +682,6 @@
 							minSize={100}
 						/>
 					</AdminSettingField>
-				{:else if RAGConfig.CONTENT_EXTRACTION_ENGINE === 'document_intelligence'}
-					<div class="grid grid-cols-1 gap-x-3 gap-y-2.5 sm:grid-cols-2">
-						<AdminSettingField
-							label={$i18n.t('settings.admin.documents.endpoint.label')}
-							description={$i18n.t('settings.admin.documents.endpoint.description')}
-						>
-							<input
-								class={inputClass}
-								placeholder={$i18n.t('Enter Document Intelligence Endpoint')}
-								bind:value={RAGConfig.DOCUMENT_INTELLIGENCE_ENDPOINT}
-							/>
-						</AdminSettingField>
-						<AdminSettingField
-							label={$i18n.t('settings.admin.documents.documentIntelligenceKey.label')}
-							description={$i18n.t('settings.admin.documents.documentIntelligenceKey.description')}
-						>
-							<SensitiveInput
-								variant="settings"
-								placeholder={$i18n.t('Enter Document Intelligence Key')}
-								bind:value={RAGConfig.DOCUMENT_INTELLIGENCE_KEY}
-								required={false}
-							/>
-						</AdminSettingField>
-					</div>
-
-					<AdminSettingField
-						label={$i18n.t('settings.admin.documents.documentIntelligenceModel.label')}
-						description={$i18n.t('settings.admin.documents.documentIntelligenceModel.description')}
-					>
-						<input
-							class={inputClass}
-							placeholder={$i18n.t('Enter Document Intelligence Model')}
-							bind:value={RAGConfig.DOCUMENT_INTELLIGENCE_MODEL}
-						/>
-					</AdminSettingField>
-				{:else if RAGConfig.CONTENT_EXTRACTION_ENGINE === 'mistral_ocr'}
-					<div class="grid grid-cols-1 gap-x-3 gap-y-2.5 sm:grid-cols-2">
-						<AdminSettingField
-							label={$i18n.t('settings.admin.documents.mistralOcrApiBaseUrl.label')}
-							description={$i18n.t('settings.admin.documents.mistralOcrApiBaseUrl.description')}
-						>
-							<input
-								class={inputClass}
-								placeholder={$i18n.t('Enter Mistral API Base URL')}
-								bind:value={RAGConfig.MISTRAL_OCR_API_BASE_URL}
-							/>
-						</AdminSettingField>
-						<AdminSettingField
-							label={$i18n.t('settings.admin.documents.mistralOcrApiKey.label')}
-							description={$i18n.t('settings.admin.documents.mistralOcrApiKey.description')}
-						>
-							<SensitiveInput
-								variant="settings"
-								placeholder={$i18n.t('Enter Mistral API Key')}
-								bind:value={RAGConfig.MISTRAL_OCR_API_KEY}
-							/>
-						</AdminSettingField>
-					</div>
-					<AdminSettingRow
-						label={$i18n.t('settings.admin.documents.useBase64.label')}
-						description={$i18n.t('settings.admin.documents.useBase64.description')}
-						let:labelId
-					>
-						<Switch bind:state={RAGConfig.MISTRAL_OCR_USE_BASE64} ariaLabelledbyId={labelId} />
-					</AdminSettingRow>
 				{:else if RAGConfig.CONTENT_EXTRACTION_ENGINE === 'paddleocr_vl'}
 					<div class="grid grid-cols-1 gap-x-3 gap-y-2.5 sm:grid-cols-2">
 						<AdminSettingField
@@ -1011,9 +908,7 @@
 								if (e.target.value === 'ollama') {
 									RAG_EMBEDDING_MODEL = '';
 								} else if (e.target.value === 'openai') {
-									RAG_EMBEDDING_MODEL = 'text-embedding-3-small';
-								} else if (e.target.value === 'azure_openai') {
-									RAG_EMBEDDING_MODEL = 'text-embedding-3-small';
+									RAG_EMBEDDING_MODEL = '';
 								} else if (e.target.value === '') {
 									RAG_EMBEDDING_MODEL = 'sentence-transformers/all-MiniLM-L6-v2';
 								}
@@ -1024,7 +919,6 @@
 							>
 							<option value="ollama">{$i18n.t('Ollama')}</option>
 							<option value="openai">{$i18n.t('OpenAI')}</option>
-							<option value="azure_openai">{$i18n.t('Azure OpenAI')}</option>
 						</SettingsSelect>
 					</AdminSettingRow>
 
@@ -1075,41 +969,6 @@
 									placeholder={$i18n.t('settings.admin.documents.ollamakey.label')}
 									bind:value={OllamaKey}
 									required={false}
-								/>
-							</AdminSettingField>
-						</div>
-					{:else if RAG_EMBEDDING_ENGINE === 'azure_openai'}
-						<div class="grid grid-cols-1 gap-x-3 gap-y-2.5 sm:grid-cols-2">
-							<AdminSettingField
-								label={$i18n.t('settings.admin.documents.azureopenaiurl.label')}
-								description={$i18n.t('settings.admin.documents.azureopenaiurl.description')}
-							>
-								<input
-									class={inputClass}
-									placeholder={$i18n.t('settings.admin.documents.azureopenaiurl.label')}
-									bind:value={AzureOpenAIUrl}
-									required
-								/>
-							</AdminSettingField>
-							<AdminSettingField
-								label={$i18n.t('settings.admin.documents.azureopenaikey.label')}
-								description={$i18n.t('settings.admin.documents.azureopenaikey.description')}
-							>
-								<SensitiveInput
-									variant="settings"
-									placeholder={$i18n.t('settings.admin.documents.azureopenaikey.label')}
-									bind:value={AzureOpenAIKey}
-								/>
-							</AdminSettingField>
-							<AdminSettingField
-								label={$i18n.t('settings.admin.documents.version.label')}
-								description={$i18n.t('settings.admin.documents.version.description')}
-							>
-								<input
-									class={inputClass}
-									placeholder={$i18n.t('settings.admin.documents.version.label')}
-									bind:value={AzureOpenAIVersion}
-									required
 								/>
 							</AdminSettingField>
 						</div>
@@ -1182,7 +1041,7 @@
 						/>
 					</AdminSettingRow>
 
-					{#if RAG_EMBEDDING_ENGINE === 'ollama' || RAG_EMBEDDING_ENGINE === 'openai' || RAG_EMBEDDING_ENGINE === 'azure_openai'}
+					{#if RAG_EMBEDDING_ENGINE === 'ollama' || RAG_EMBEDDING_ENGINE === 'openai'}
 						<AdminSettingRow
 							label={$i18n.t('settings.admin.documents.asyncEmbeddingProcessing.label')}
 							description={$i18n.t('settings.admin.documents.asyncEmbeddingProcessing.description')}

@@ -41,7 +41,6 @@
 	export let stopResponse: Function;
 
 	export let autoScroll = false;
-	export let callActive = false;
 	export let callEnabled = true;
 
 	export let atSelectedModel: Model | undefined;
@@ -246,7 +245,6 @@
 				{#if !($selectedFolder && folderReadOnly)}
 					<MessageInput
 						{terminalContext}
-						{callActive}
 						{callEnabled}
 						bind:this={messageInput}
 						{history}

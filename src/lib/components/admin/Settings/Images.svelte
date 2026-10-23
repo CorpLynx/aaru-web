@@ -126,11 +126,6 @@
 			config.ENABLE_IMAGE_GENERATION = false;
 
 			return null;
-		} else if (config.IMAGE_GENERATION_ENGINE === 'gemini' && config.IMAGES_GEMINI_API_KEY === '') {
-			toast.error($i18n.t('Gemini API Key is required.'));
-			config.ENABLE_IMAGE_GENERATION = false;
-
-			return null;
 		}
 
 		const res = await updateConfig(localStorage.token, {
@@ -348,7 +343,6 @@
 							<option value="openai">{$i18n.t('Default (Open AI)')}</option>
 							<option value="comfyui">{$i18n.t('ComfyUI')}</option>
 							<option value="automatic1111">{$i18n.t('Automatic1111')}</option>
-							<option value="gemini">{$i18n.t('Gemini')}</option>
 						</SettingsSelect>
 					</AdminSettingRow>
 
@@ -425,16 +419,6 @@
 								/>
 							</AdminSettingField>
 						</div>
-
-						<AdminSettingField
-							label={$i18n.t('settings.admin.images.imagesOpenaiApiVersion.label')}
-						>
-							<input
-								class={inputClass}
-								placeholder={$i18n.t('settings.admin.images.imagesOpenaiApiVersion.label')}
-								bind:value={config.IMAGES_OPENAI_API_VERSION}
-							/>
-						</AdminSettingField>
 
 						<AdminSettingField
 							label={$i18n.t('settings.admin.images.imagesOpenaiApiParams.label')}
@@ -709,42 +693,6 @@
 								</div>
 							</AdminSettingField>
 						{/if}
-					{:else if config?.IMAGE_GENERATION_ENGINE === 'gemini'}
-						<AdminSettingField
-							label={$i18n.t('settings.admin.images.imagesGeminiApiBaseUrl.label')}
-							description={$i18n.t('settings.admin.images.imagesGeminiApiBaseUrl.description')}
-						>
-							<input
-								class={inputClass}
-								placeholder={$i18n.t('settings.admin.images.imagesOpenaiApiBaseUrl.label')}
-								bind:value={config.IMAGES_GEMINI_API_BASE_URL}
-							/>
-						</AdminSettingField>
-
-						<AdminSettingField
-							label={$i18n.t('settings.admin.images.imagesGeminiApiKey.label')}
-							description={$i18n.t('settings.admin.images.imagesGeminiApiKey.description')}
-						>
-							<SensitiveInput
-								variant="settings"
-								placeholder={$i18n.t('settings.admin.images.imagesGeminiApiKey.label')}
-								bind:value={config.IMAGES_GEMINI_API_KEY}
-								required={true}
-							/>
-						</AdminSettingField>
-
-						<AdminSettingRow
-							label={$i18n.t('settings.admin.images.geminiEndpointMethod.label')}
-							description={$i18n.t('settings.admin.images.geminiEndpointMethod.description')}
-						>
-							<SettingsSelect
-								bind:value={config.IMAGES_GEMINI_ENDPOINT_METHOD}
-								placeholder={$i18n.t('Select Method')}
-							>
-								<option value="predict">predict</option>
-								<option value="generateContent">generateContent</option>
-							</SettingsSelect>
-						</AdminSettingRow>
 					{/if}
 				</AdminSettingSection>
 
@@ -767,7 +715,6 @@
 						>
 							<option value="openai">{$i18n.t('Default (Open AI)')}</option>
 							<option value="comfyui">{$i18n.t('ComfyUI')}</option>
-							<option value="gemini">{$i18n.t('Gemini')}</option>
 						</SettingsSelect>
 					</AdminSettingRow>
 
@@ -821,16 +768,6 @@
 								/>
 							</AdminSettingField>
 						</div>
-
-						<AdminSettingField
-							label={$i18n.t('settings.admin.images.imagesEditOpenaiApiVersion.label')}
-						>
-							<input
-								class={inputClass}
-								placeholder={$i18n.t('settings.admin.images.imagesEditOpenaiApiVersion.label')}
-								bind:value={config.IMAGES_EDIT_OPENAI_API_VERSION}
-							/>
-						</AdminSettingField>
 					{:else if config?.IMAGE_EDIT_ENGINE === 'comfyui'}
 						<AdminSettingField
 							label={$i18n.t('settings.admin.images.imagesEditComfyuiBaseUrl.label')}
@@ -1012,29 +949,6 @@
 								</div>
 							</AdminSettingField>
 						{/if}
-					{:else if config?.IMAGE_EDIT_ENGINE === 'gemini'}
-						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-							<AdminSettingField
-								label={$i18n.t('settings.admin.images.imagesEditGeminiApiBaseUrl.label')}
-							>
-								<input
-									class={inputClass}
-									placeholder={$i18n.t('settings.admin.images.imagesOpenaiApiBaseUrl.label')}
-									bind:value={config.IMAGES_EDIT_GEMINI_API_BASE_URL}
-								/>
-							</AdminSettingField>
-
-							<AdminSettingField
-								label={$i18n.t('settings.admin.images.imagesEditGeminiApiKey.label')}
-							>
-								<SensitiveInput
-									variant="settings"
-									placeholder={$i18n.t('settings.admin.images.imagesEditGeminiApiKey.label')}
-									bind:value={config.IMAGES_EDIT_GEMINI_API_KEY}
-									required={true}
-								/>
-							</AdminSettingField>
-						</div>
 					{/if}
 				</AdminSettingSection>
 			</div>

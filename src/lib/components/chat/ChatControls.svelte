@@ -41,7 +41,6 @@
 	export let chatFiles = [];
 	export let params = {};
 
-	export let bridge: import('$lib/utils/realtime').RealtimeCall;
 	export let callMode = 'current';
 	export let eventTarget: EventTarget;
 	export let submitPrompt: Function;
@@ -213,7 +212,6 @@
 						class="h-full max-h-[100dvh] bg-white text-gray-700 dark:bg-black dark:text-gray-300 flex justify-center"
 					>
 						<CallPanel
-							{bridge}
 							bind:callMode
 							bind:files
 							{submitPrompt}
@@ -338,7 +336,6 @@
 				{#if $showCallOverlay}
 					<div class="w-full h-full flex justify-center">
 						<CallPanel
-							{bridge}
 							bind:callMode
 							bind:files
 							{submitPrompt}

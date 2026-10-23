@@ -94,28 +94,3 @@ class UnstructuredLoader:
                 for element in elements
             ]
         return [Document(page_content='\n\n'.join(map(str, elements)), metadata=metadata)]
-
-
-class DocumentIntelligenceLoader:
-    def __init__(self, file_path, api_endpoint, api_key=None, azure_credential=None, api_model='prebuilt-layout'):
-        if (api_key is None) == (azure_credential is None):
-            raise ValueError('Provide exactly one of api_key or azure_credential.')
-        self.file_path = file_path
-        self.api_endpoint = api_endpoint
-        self.api_key = api_key
-        self.azure_credential = azure_credential
-        self.api_model = api_model
-
-    def load(self) -> list[Document]:
-        from azure.ai.documentintelligence import DocumentIntelligenceClient
-        from azure.core.credentials import AzureKeyCredential
-
-        credential = self.azure_credential if self.azure_credential is not None else AzureKeyCredential(self.api_key)
-        with DocumentIntelligenceClient(self.api_endpoint, credential) as client, open(self.file_path, 'rb') as file:
-            result = client.begin_analyze_document(
-                self.api_model,
-                body=file,
-                content_type='application/octet-stream',
-                output_content_format='markdown',
-            ).result()
-        return [Document(page_content=result.content, metadata=result.as_dict())]

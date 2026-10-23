@@ -281,9 +281,6 @@ RETRIEVAL_CONFIG_KEYS = {
     'DOCLING_API_KEY': 'rag.docling_api_key',
     'DOCLING_PARAMS': 'rag.docling_params',
     'DOCLING_SERVER_URL': 'rag.docling_server_url',
-    'DOCUMENT_INTELLIGENCE_ENDPOINT': 'rag.document_intelligence_endpoint',
-    'DOCUMENT_INTELLIGENCE_KEY': 'rag.document_intelligence_key',
-    'DOCUMENT_INTELLIGENCE_MODEL': 'rag.document_intelligence_model',
     'ENABLE_ASYNC_EMBEDDING': 'rag.enable_async_embedding',
     'ENABLE_GOOGLE_DRIVE_INTEGRATION': 'google_drive.enable',
     'ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER': 'rag.enable_markdown_header_text_splitter',
@@ -327,9 +324,6 @@ RETRIEVAL_CONFIG_KEYS = {
     'MICROSOFT_WEB_IQ_API_BASE_URL': 'web.search.microsoft_web_iq_api_base_url',
     'MICROSOFT_WEB_IQ_API_KEY': 'web.search.microsoft_web_iq_api_key',
     'MICROSOFT_WEB_IQ_LANGUAGE': 'web.search.microsoft_web_iq_language',
-    'MISTRAL_OCR_API_BASE_URL': 'rag.mistral_ocr_api_base_url',
-    'MISTRAL_OCR_API_KEY': 'rag.mistral_ocr_api_key',
-    'MISTRAL_OCR_USE_BASE64': 'rag.mistral_ocr_use_base64',
     'MOJEEK_SEARCH_API_KEY': 'web.search.mojeek_search_api_key',
     'OLLAMA_CLOUD_WEB_SEARCH_API_KEY': 'web.search.ollama_cloud_api_key',
     'PADDLEOCR_VL_BASE_URL': 'rag.paddleocr_vl_base_url',
@@ -342,9 +336,6 @@ RETRIEVAL_CONFIG_KEYS = {
     'PERPLEXITY_SEARCH_CONTEXT_USAGE': 'web.search.perplexity_search_context_usage',
     'PLAYWRIGHT_TIMEOUT': 'web.loader.playwright_timeout',
     'PLAYWRIGHT_WS_URL': 'web.loader.playwright_ws_url',
-    'RAG_AZURE_OPENAI_API_KEY': 'rag.azure_openai.api_key',
-    'RAG_AZURE_OPENAI_API_VERSION': 'rag.azure_openai.api_version',
-    'RAG_AZURE_OPENAI_BASE_URL': 'rag.azure_openai.base_url',
     'RAG_EMBEDDING_BATCH_SIZE': 'rag.embedding_batch_size',
     'RAG_EMBEDDING_CONCURRENT_REQUESTS': 'rag.embedding_concurrent_requests',
     'RAG_EMBEDDING_ENGINE': 'rag.embedding_engine',
@@ -456,11 +447,6 @@ async def get_embedding_config(request: Request, user=Depends(get_admin_user)):
             'url': config['rag.ollama.base_url'],
             'key': config['rag.ollama.api_key'],
         },
-        'azure_openai_config': {
-            'url': config['rag.azure_openai.base_url'],
-            'key': config['rag.azure_openai.api_key'],
-            'version': config['rag.azure_openai.api_version'],
-        },
     }
 
 
@@ -474,16 +460,9 @@ class OllamaConfigForm(BaseModel):
     key: str | None = None
 
 
-class AzureOpenAIConfigForm(BaseModel):
-    url: str | None = None
-    key: str | None = None
-    version: str | None = None
-
-
 class EmbeddingModelUpdateForm(BaseModel):
     openai_config: OpenAIConfigForm | None = None
     ollama_config: OllamaConfigForm | None = None
-    azure_openai_config: AzureOpenAIConfigForm | None = None
     RAG_EMBEDDING_ENGINE: str
     RAG_EMBEDDING_MODEL: str
     RAG_EMBEDDING_BATCH_SIZE: int | None = 1
@@ -510,7 +489,7 @@ async def unload_embedding_model(request: Request):
 @router.post('/embedding/update')
 async def update_embedding_config(request: Request, form_data: EmbeddingModelUpdateForm, user=Depends(get_admin_user)):
     if USE_SLIM and form_data.RAG_EMBEDDING_ENGINE == '':
-        raise HTTPException(400, 'Slim requires an external embedding engine (openai, ollama, azure_openai).')
+        raise HTTPException(400, 'Slim requires an external embedding engine (openai, ollama).')
     config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
     log.info('Updating embedding model: %s to %s', config['rag.embedding_model'], form_data.RAG_EMBEDDING_MODEL)
     await unload_embedding_model(request)
@@ -528,10 +507,6 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
         if form_data.RAG_EMBEDDING_ENGINE == 'ollama' and form_data.ollama_config is not None:
             updates['rag.ollama.base_url'] = form_data.ollama_config.url or ''
             updates['rag.ollama.api_key'] = form_data.ollama_config.key or ''
-        if form_data.RAG_EMBEDDING_ENGINE == 'azure_openai' and form_data.azure_openai_config is not None:
-            updates['rag.azure_openai.base_url'] = form_data.azure_openai_config.url or ''
-            updates['rag.azure_openai.api_key'] = form_data.azure_openai_config.key or ''
-            updates['rag.azure_openai.api_version'] = form_data.azure_openai_config.version or ''
         config.update(updates)
 
         request.app.state.ef = get_ef(
@@ -546,25 +521,14 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
             (
                 config['rag.openai.api_base_url']
                 if config['rag.embedding_engine'] == 'openai'
-                else (
-                    config['rag.ollama.base_url']
-                    if config['rag.embedding_engine'] == 'ollama'
-                    else config['rag.azure_openai.base_url']
-                )
+                else (config['rag.ollama.base_url'] if config['rag.embedding_engine'] == 'ollama' else '')
             ),
             (
                 config['rag.openai.api_key']
                 if config['rag.embedding_engine'] == 'openai'
-                else (
-                    config['rag.ollama.api_key']
-                    if config['rag.embedding_engine'] == 'ollama'
-                    else config['rag.azure_openai.api_key']
-                )
+                else (config['rag.ollama.api_key'] if config['rag.embedding_engine'] == 'ollama' else '')
             ),
             config['rag.embedding_batch_size'],
-            azure_api_version=(
-                config['rag.azure_openai.api_version'] if config['rag.embedding_engine'] == 'azure_openai' else None
-            ),
             enable_async=config['rag.enable_async_embedding'],
             concurrent_requests=config['rag.embedding_concurrent_requests'],
         )
@@ -584,11 +548,6 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
             'ollama_config': {
                 'url': config['rag.ollama.base_url'],
                 'key': config['rag.ollama.api_key'],
-            },
-            'azure_openai_config': {
-                'url': config['rag.azure_openai.base_url'],
-                'key': config['rag.azure_openai.api_key'],
-                'version': config['rag.azure_openai.api_version'],
             },
         }
     except Exception as e:
@@ -639,12 +598,6 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         'DOCLING_SERVER_URL': config['rag.docling_server_url'],
         'DOCLING_API_KEY': config['rag.docling_api_key'],
         'DOCLING_PARAMS': config['rag.docling_params'],
-        'DOCUMENT_INTELLIGENCE_ENDPOINT': config['rag.document_intelligence_endpoint'],
-        'DOCUMENT_INTELLIGENCE_KEY': config['rag.document_intelligence_key'],
-        'DOCUMENT_INTELLIGENCE_MODEL': config['rag.document_intelligence_model'],
-        'MISTRAL_OCR_API_BASE_URL': config['rag.mistral_ocr_api_base_url'],
-        'MISTRAL_OCR_API_KEY': config['rag.mistral_ocr_api_key'],
-        'MISTRAL_OCR_USE_BASE64': config['rag.mistral_ocr_use_base64'],
         'PADDLEOCR_VL_BASE_URL': config['rag.paddleocr_vl_base_url'],
         'PADDLEOCR_VL_TOKEN': config['rag.paddleocr_vl_token'],
         # MinerU settings
@@ -885,12 +838,6 @@ class ConfigForm(BaseModel):
     DOCLING_SERVER_URL: str | None = None
     DOCLING_API_KEY: str | None = None
     DOCLING_PARAMS: dict | None = None
-    DOCUMENT_INTELLIGENCE_ENDPOINT: str | None = None
-    DOCUMENT_INTELLIGENCE_KEY: str | None = None
-    DOCUMENT_INTELLIGENCE_MODEL: str | None = None
-    MISTRAL_OCR_API_BASE_URL: str | None = None
-    MISTRAL_OCR_API_KEY: str | None = None
-    MISTRAL_OCR_USE_BASE64: bool | None = None
     PADDLEOCR_VL_BASE_URL: str | None = None
     PADDLEOCR_VL_TOKEN: str | None = None
 
@@ -1071,12 +1018,6 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         'DOCLING_SERVER_URL': config['rag.docling_server_url'],
         'DOCLING_API_KEY': config['rag.docling_api_key'],
         'DOCLING_PARAMS': config['rag.docling_params'],
-        'DOCUMENT_INTELLIGENCE_ENDPOINT': config['rag.document_intelligence_endpoint'],
-        'DOCUMENT_INTELLIGENCE_KEY': config['rag.document_intelligence_key'],
-        'DOCUMENT_INTELLIGENCE_MODEL': config['rag.document_intelligence_model'],
-        'MISTRAL_OCR_API_BASE_URL': config['rag.mistral_ocr_api_base_url'],
-        'MISTRAL_OCR_API_KEY': config['rag.mistral_ocr_api_key'],
-        'MISTRAL_OCR_USE_BASE64': config['rag.mistral_ocr_use_base64'],
         'PADDLEOCR_VL_BASE_URL': config['rag.paddleocr_vl_base_url'],
         'PADDLEOCR_VL_TOKEN': config['rag.paddleocr_vl_token'],
         # MinerU settings
@@ -1497,25 +1438,14 @@ def save_docs_to_vector_db(
             (
                 config['rag.openai.api_base_url']
                 if config['rag.embedding_engine'] == 'openai'
-                else (
-                    config['rag.ollama.base_url']
-                    if config['rag.embedding_engine'] == 'ollama'
-                    else config['rag.azure_openai.base_url']
-                )
+                else (config['rag.ollama.base_url'] if config['rag.embedding_engine'] == 'ollama' else '')
             ),
             (
                 config['rag.openai.api_key']
                 if config['rag.embedding_engine'] == 'openai'
-                else (
-                    config['rag.ollama.api_key']
-                    if config['rag.embedding_engine'] == 'ollama'
-                    else config['rag.azure_openai.api_key']
-                )
+                else (config['rag.ollama.api_key'] if config['rag.embedding_engine'] == 'ollama' else '')
             ),
             config['rag.embedding_batch_size'],
-            azure_api_version=(
-                config['rag.azure_openai.api_version'] if config['rag.embedding_engine'] == 'azure_openai' else None
-            ),
             enable_async=config['rag.enable_async_embedding'],
             concurrent_requests=config['rag.embedding_concurrent_requests'],
         )

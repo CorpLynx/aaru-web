@@ -734,12 +734,9 @@ async def initialize_runtime_config(app: FastAPI):
         'rag.embedding_model',
         'rag.openai.api_base_url',
         'rag.ollama.base_url',
-        'rag.azure_openai.base_url',
         'rag.openai.api_key',
         'rag.ollama.api_key',
-        'rag.azure_openai.api_key',
         'rag.embedding_batch_size',
-        'rag.azure_openai.api_version',
         'rag.enable_async_embedding',
         'rag.embedding_concurrent_requests',
         'rag.reranking_engine',
@@ -754,25 +751,14 @@ async def initialize_runtime_config(app: FastAPI):
         url=(
             rag_config.get('rag.openai.api_base_url')
             if embedding_engine == 'openai'
-            else (
-                rag_config.get('rag.ollama.base_url')
-                if embedding_engine == 'ollama'
-                else rag_config.get('rag.azure_openai.base_url')
-            )
+            else (rag_config.get('rag.ollama.base_url') if embedding_engine == 'ollama' else '')
         ),
         key=(
             rag_config.get('rag.openai.api_key')
             if embedding_engine == 'openai'
-            else (
-                rag_config.get('rag.ollama.api_key')
-                if embedding_engine == 'ollama'
-                else rag_config.get('rag.azure_openai.api_key')
-            )
+            else (rag_config.get('rag.ollama.api_key') if embedding_engine == 'ollama' else '')
         ),
         embedding_batch_size=rag_config.get('rag.embedding_batch_size'),
-        azure_api_version=(
-            rag_config.get('rag.azure_openai.api_version') if embedding_engine == 'azure_openai' else None
-        ),
         enable_async=rag_config.get('rag.enable_async_embedding'),
         concurrent_requests=rag_config.get('rag.embedding_concurrent_requests'),
     )
@@ -2369,9 +2355,6 @@ async def get_app_config(request: Request):
         'ui.prompt_suggestions_i18n',
         'code_execution.engine',
         'code_interpreter.engine',
-        'audio.realtime.enabled',
-        'audio.realtime.model',
-        'audio.realtime.voice',
         'audio.tts.engine',
         'audio.tts.voice',
         'audio.tts.split_on',
@@ -2486,11 +2469,6 @@ async def get_app_config(request: Request):
                     'interpreter_engine': config.get('code_interpreter.engine'),
                 },
                 'audio': {
-                    'realtime': {
-                        'enabled': config.get('audio.realtime.enabled'),
-                        'model': config.get('audio.realtime.model'),
-                        'voice': config.get('audio.realtime.voice'),
-                    },
                     'tts': {
                         'engine': config.get('audio.tts.engine'),
                         'voice': config.get('audio.tts.voice'),

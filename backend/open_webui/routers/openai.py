@@ -1,24 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
-import re
 from typing import Optional
-from urllib.parse import quote, urlparse
 
-import aiofiles
 import aiohttp
 from aiocache import cached
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import (
-    FileResponse,
     JSONResponse,
     PlainTextResponse,
     StreamingResponse,
-)
-from open_webui.config import (
-    CACHE_DIR,
 )
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import (
@@ -37,8 +29,7 @@ from open_webui.models.config import Config
 from open_webui.models.groups import Groups
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel
-from open_webui.utils.access_control import check_model_access, has_connection_access, has_permission
-from open_webui.utils.anthropic import ANTHROPIC_VERSION, get_anthropic_models, is_anthropic_url
+from open_webui.utils.access_control import check_model_access, has_connection_access
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.headers import get_headers_and_cookies, include_user_info_headers
 from open_webui.utils.json_codec import JSONCodec
@@ -75,7 +66,6 @@ log = logging.getLogger(__name__)
 # Also drop server and date: uvicorn adds its own and forwarding both duplicates them.
 _STRIP_PROXY_HEADERS = frozenset({'content-encoding', 'content-length', 'transfer-encoding', 'server', 'date'})
 _MODEL_LIST_TIMEOUT = aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST)
-_UNSUPPORTED_OPENAI_MODEL_KEYWORDS = ('babbage', 'dall-e', 'davinci', 'embedding', 'tts', 'whisper')
 BASE_MODELS_CACHE_KEY = f'{REDIS_KEY_PREFIX}:models:base'
 
 
@@ -124,30 +114,7 @@ async def get_models_request(
     user: UserModel = None,
     config=None,
 ):
-    if is_anthropic_url(url):
-        return await get_anthropic_models(url, key, user=user)
     return await send_get_request(request, f'{url}/models', key, user=user, config=config)
-
-
-def openai_reasoning_model_handler(payload):
-    """
-    Handle reasoning model specific parameters
-    """
-    if 'max_tokens' in payload:
-        # Convert "max_tokens" to "max_completion_tokens" for all reasoning models
-        payload['max_completion_tokens'] = payload['max_tokens']
-        del payload['max_tokens']
-
-    # Handle system role conversion based on model type
-    if payload['messages'][0]['role'] == 'system':
-        model_lower = payload['model'].lower()
-        # Legacy models use "user" role instead of "system"
-        if model_lower.startswith('o1-mini') or model_lower.startswith('o1-preview'):
-            payload['messages'][0]['role'] = 'user'
-        else:
-            payload['messages'][0]['role'] = 'developer'
-
-    return payload
 
 
 ##########################################
@@ -398,13 +365,6 @@ async def get_anthropic_request_target(request: Request, form_data: dict, user: 
 
     headers, cookies = await get_headers_and_cookies(request, url, key, api_config, user=user)
 
-    # Anthropic's native endpoints reject bearer auth, the key belongs in x-api-key.
-    if is_anthropic_url(url):
-        headers.setdefault('anthropic-version', ANTHROPIC_VERSION)
-        if api_config.get('auth_type') in (None, 'bearer'):
-            headers.pop('Authorization', None)
-            headers.setdefault('x-api-key', key)
-
     return requested_model, payload, url, key, headers, cookies
 
 
@@ -512,82 +472,6 @@ async def update_config(request: Request, form_data: OpenAIConfigForm, user=Depe
         'OPENAI_API_KEYS': api_keys,
         'OPENAI_API_CONFIGS': api_configs,
     }
-
-
-@router.post('/audio/speech')
-async def speech(request: Request, user=Depends(get_verified_user)):
-    if user.role != 'admin' and not await has_permission(user.id, 'chat.tts', await Config.get('user.permissions')):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-    idx = None
-    try:
-        _, api_base_urls, _, _ = await get_openai_runtime_config()
-        idx = api_base_urls.index('https://api.openai.com/v1')
-
-        body = await request.body()
-        name = hashlib.sha256(body).hexdigest()
-
-        SPEECH_CACHE_DIR = CACHE_DIR / 'audio' / 'speech'
-        SPEECH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        file_path = SPEECH_CACHE_DIR.joinpath(f'{name}.mp3')
-        file_body_path = SPEECH_CACHE_DIR.joinpath(f'{name}.json')
-
-        # Check if the file already exists in the cache
-        if file_path.is_file():
-            return FileResponse(file_path)
-
-        url, key, api_config = await get_openai_connection(idx)
-
-        headers, cookies = await get_headers_and_cookies(request, url, key, api_config, user=user)
-
-        r = None
-        try:
-            session = await get_session()
-            r = await session.post(
-                url=f'{url}/audio/speech',
-                data=body,
-                headers=headers,
-                cookies=cookies,
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            )
-
-            r.raise_for_status()
-
-            async with aiofiles.open(file_path, 'wb') as f:
-                async for chunk in r.content.iter_chunked(8192):
-                    await f.write(chunk)
-
-            async with aiofiles.open(file_body_path, 'w') as f:
-                await f.write(JSONCodec.dumps(JSONCodec.loads(body.decode('utf-8'))))
-
-            # Return the saved file
-            return FileResponse(file_path)
-
-        except Exception as e:
-            log.exception(e)
-
-            detail = None
-            if r is not None:
-                try:
-                    res = await r.json(loads=JSONCodec.loads)
-                    if 'error' in res:
-                        detail = f'External: {res["error"]}'
-                except Exception:
-                    detail = f'External: {e}'
-
-            # LICENSE covers this Open WebUI error identifier.
-            # Do not alter, remove, obscure, or replace it except as LICENSE permits:
-            # https://docs.openwebui.com/license.
-            raise HTTPException(
-                status_code=r.status if r else 500,
-                detail=detail if detail else 'Open WebUI: Server Connection Error',
-            )
-
-    except ValueError:
-        raise HTTPException(status_code=401, detail=ERROR_MESSAGES.OPENAI_NOT_FOUND)
 
 
 async def get_all_models_responses(request: Request, user: UserModel) -> list:
@@ -729,9 +613,6 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
             return response
         return None
 
-    def is_supported_openai_models(model_id):
-        return not any(name in model_id for name in _UNSUPPORTED_OPENAI_MODEL_KEYWORDS)
-
     def get_merged_models(model_lists):
         log.debug('merge_models_lists %s', model_lists)
         models = {}
@@ -739,15 +620,10 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
         for idx, model_list in enumerate(model_lists):
             if model_list is not None and 'error' not in model_list:
                 base_url = api_base_urls[idx]
-                hostname = urlparse(base_url).hostname if base_url else None
                 api_config = api_configs.get(str(idx), api_configs.get(base_url, {}))
 
                 for model in model_list:
                     model_id = model.get('id') or model.get('name')
-
-                    if hostname == 'api.openai.com' and not is_supported_openai_models(model_id):
-                        # Skip unwanted OpenAI models
-                        continue
 
                     if model_id and model_id not in models:
                         provider = model.get('provider', '')
@@ -806,42 +682,23 @@ async def get_models(request: Request, url_idx: int | None = None, user=Depends(
             try:
                 headers, cookies = await get_headers_and_cookies(request, url, key, api_config, user=user)
 
-                if api_config.get('azure') or api_config.get('provider') == 'azure':
-                    models = {
-                        'data': api_config.get('model_ids', []) or [],
-                        'object': 'list',
-                    }
-                elif is_anthropic_url(url):
-                    models = await get_anthropic_models(url, key, user=user)
-                    if models is None:
-                        raise Exception('Failed to connect to Anthropic API')
-                else:
-                    async with session.get(
-                        f'{url}/models',
-                        headers=headers,
-                        cookies=cookies,
-                        ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                    ) as r:
-                        if r.status != 200:
-                            error_detail = f'HTTP Error: {r.status}'
-                            try:
-                                res = await r.json(loads=JSONCodec.loads)
-                                if 'error' in res:
-                                    error_detail = f'External Error: {res["error"]}'
-                            except Exception:
-                                pass
-                            raise Exception(error_detail)
+                async with session.get(
+                    f'{url}/models',
+                    headers=headers,
+                    cookies=cookies,
+                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                ) as r:
+                    if r.status != 200:
+                        error_detail = f'HTTP Error: {r.status}'
+                        try:
+                            res = await r.json(loads=JSONCodec.loads)
+                            if 'error' in res:
+                                error_detail = f'External Error: {res["error"]}'
+                        except Exception:
+                            pass
+                        raise Exception(error_detail)
 
-                        response_data = await r.json(loads=JSONCodec.loads)
-
-                        if 'api.openai.com' in url:
-                            response_data['data'] = [
-                                model
-                                for model in response_data.get('data', [])
-                                if not any(name in model['id'] for name in _UNSUPPORTED_OPENAI_MODEL_KEYWORDS)
-                            ]
-
-                        models = response_data
+                    models = await r.json(loads=JSONCodec.loads)
             except aiohttp.ClientError as e:
                 # ClientError covers all aiohttp requests issues
                 log.exception(f'Client error: {str(e)}')
@@ -1000,66 +857,24 @@ async def verify_connection(
         try:
             headers, cookies = await get_headers_and_cookies(request, url, key, api_config, user=user)
 
-            if api_config.get('azure') or api_config.get('provider') == 'azure':
-                # Only set api-key header if not using Azure Entra ID authentication
-                auth_type = api_config.get('auth_type', 'bearer')
-                if auth_type not in ('azure_ad', 'microsoft_entra_id'):
-                    headers['api-key'] = key
+            async with session.get(
+                f'{url}/models',
+                headers=headers,
+                cookies=cookies,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as r:
+                try:
+                    response_data = await r.json(loads=JSONCodec.loads)
+                except Exception:
+                    response_data = await r.text()
 
-                # Azure v1 format: base URL already ends with /openai/v1,
-                # use standard /models endpoint without api-version.
-                is_azure_v1 = bool(re.search(r'/openai/v1(?:/|$)', url))
+                if r.status != 200:
+                    if isinstance(response_data, (dict, list)):
+                        return JSONResponse(status_code=r.status, content=response_data)
+                    else:
+                        return PlainTextResponse(status_code=r.status, content=response_data)
 
-                if is_azure_v1:
-                    verify_url = f'{url.rstrip("/")}/models'
-                else:
-                    api_version = api_config.get('api_version', '') or '2023-03-15-preview'
-                    verify_url = f'{url}/openai/models?api-version={api_version}'
-
-                async with session.get(
-                    url=verify_url,
-                    headers=headers,
-                    cookies=cookies,
-                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                ) as r:
-                    try:
-                        response_data = await r.json(loads=JSONCodec.loads)
-                    except Exception:
-                        response_data = await r.text()
-
-                    if r.status != 200:
-                        if isinstance(response_data, (dict, list)):
-                            return JSONResponse(status_code=r.status, content=response_data)
-                        else:
-                            return PlainTextResponse(status_code=r.status, content=response_data)
-
-                    return response_data
-            elif is_anthropic_url(url):
-                result = await get_anthropic_models(url, key)
-                if result is None:
-                    raise HTTPException(status_code=500, detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR)
-                if 'error' in result:
-                    raise HTTPException(status_code=500, detail=result['error'])
-                return result
-            else:
-                async with session.get(
-                    f'{url}/models',
-                    headers=headers,
-                    cookies=cookies,
-                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                ) as r:
-                    try:
-                        response_data = await r.json(loads=JSONCodec.loads)
-                    except Exception:
-                        response_data = await r.text()
-
-                    if r.status != 200:
-                        if isinstance(response_data, (dict, list)):
-                            return JSONResponse(status_code=r.status, content=response_data)
-                        else:
-                            return PlainTextResponse(status_code=r.status, content=response_data)
-
-                    return response_data
+                return response_data
 
         except aiohttp.ClientError as e:
             # ClientError covers all aiohttp requests issues
@@ -1068,104 +883,6 @@ async def verify_connection(
         except Exception as e:
             log.exception(f'Unexpected error: {e}')
             raise HTTPException(status_code=500, detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR)
-
-
-def get_azure_allowed_params(api_version: str) -> set[str]:
-    allowed_params = {
-        'messages',
-        'temperature',
-        'role',
-        'content',
-        'contentPart',
-        'contentPartImage',
-        'enhancements',
-        'dataSources',
-        'n',
-        'stream',
-        'stop',
-        'max_tokens',
-        'presence_penalty',
-        'frequency_penalty',
-        'logit_bias',
-        'user',
-        'function_call',
-        'functions',
-        'tools',
-        'tool_choice',
-        'top_p',
-        'log_probs',
-        'top_logprobs',
-        'response_format',
-        'seed',
-        'max_completion_tokens',
-        'reasoning_effort',
-    }
-
-    try:
-        if api_version >= '2024-09-01-preview':
-            allowed_params.add('stream_options')
-    except ValueError:
-        log.debug('Invalid API version %s for Azure OpenAI. Defaulting to allowed parameters.', api_version)
-
-    return allowed_params
-
-
-def is_openai_new_model(model: str) -> bool:
-    # Amazon Bedrock ids carry a provider prefix, e.g. us.openai.gpt-6-sol
-    model_lower = re.sub(r'^(?:[a-z-]+\.)?openai\.', '', model.lower())
-    # o-series models (o1, o3, o4, o5, ...)
-    if re.match(r'^o\d+', model_lower):
-        return True
-    # gpt-N where N >= 5 (gpt-5, gpt-5.2, gpt-6, ...)
-    m = re.match(r'^gpt-(\d+)', model_lower)
-    if m and int(m.group(1)) >= 5:
-        return True
-    return False
-
-
-def _sanitize_model_for_url(model: str) -> str:
-    """Sanitize a model name before interpolating it into a URL path.
-
-    Rejects path traversal attempts (../, /, \\) and percent-encodes
-    the name so it is safe to use as a single URL path segment
-    (e.g. Azure deployment name).
-    """
-    if not model or '..' in model or '/' in model or '\\' in model:
-        raise HTTPException(
-            status_code=400,
-            detail='Invalid model name: must not be empty or contain path separators or traversal sequences',
-        )
-    return quote(model, safe='')
-
-
-def convert_to_azure_payload(url, payload: dict, api_version: str):
-    model = payload.get('model', '')
-
-    # Filter allowed parameters based on Azure OpenAI API
-    allowed_params = get_azure_allowed_params(api_version)
-
-    # Special handling for o-series models
-    if is_openai_new_model(model):
-        # Convert max_tokens to max_completion_tokens for o-series models
-        if 'max_tokens' in payload:
-            payload['max_completion_tokens'] = payload['max_tokens']
-            del payload['max_tokens']
-
-        # Remove temperature if not 1 for o-series models
-        if 'temperature' in payload and payload['temperature'] != 1:
-            log.debug(
-                'Removing temperature parameter for o-series model %s as only default value (1) is supported', model
-            )
-            del payload['temperature']
-
-    # Filter out unsupported parameters
-    payload = {k: v for k, v in payload.items() if k in allowed_params}
-
-    # Sanitize model name to prevent path traversal in the deployment URL
-    model = _sanitize_model_for_url(model)
-
-    url = f'{url}/openai/deployments/{model}'
-    return url, payload
 
 
 # Fields accepted by the Responses API for each input item type.
@@ -1490,17 +1207,10 @@ async def generate_chat_completion(
             'role': user.role,
         }
 
-    # Check if model is a reasoning model that needs special handling
-    if is_openai_new_model(payload['model']):
-        payload = openai_reasoning_model_handler(payload)
-    elif 'api.openai.com' not in url:
-        # Remove "max_completion_tokens" from the payload for backward compatibility
-        if 'max_completion_tokens' in payload:
-            payload['max_tokens'] = payload['max_completion_tokens']
-            del payload['max_completion_tokens']
-
-    if 'max_tokens' in payload and 'max_completion_tokens' in payload:
-        del payload['max_tokens']
+    # AARU: local OpenAI-compatible servers expect "max_tokens".
+    if 'max_completion_tokens' in payload:
+        payload['max_tokens'] = payload['max_completion_tokens']
+        del payload['max_completion_tokens']
 
     # Convert the modified body back to JSON
     if 'logit_bias' in payload and payload['logit_bias']:
@@ -1527,38 +1237,11 @@ async def generate_chat_completion(
         payload['continue_final_message'] = True
         payload['add_generation_prompt'] = False
 
-    if api_config.get('azure') or api_config.get('provider') == 'azure':
-        # Only set api-key header if not using Azure Entra ID authentication
-        auth_type = api_config.get('auth_type', 'bearer')
-        if auth_type not in ('azure_ad', 'microsoft_entra_id'):
-            headers['api-key'] = key
-
-        # Azure v1 format: base URL already ends with /openai/v1,
-        # model stays in the payload, no deployment URL rewriting.
-        is_azure_v1 = bool(re.search(r'/openai/v1(?:/|$)', url))
-
-        if is_azure_v1:
-            if is_responses:
-                payload = convert_to_responses_payload(payload)
-                request_url = f'{url.rstrip("/")}/responses'
-            else:
-                request_url = f'{url.rstrip("/")}/chat/completions'
-        else:
-            api_version = api_config.get('api_version', '2023-03-15-preview')
-            request_url, payload = convert_to_azure_payload(url, payload, api_version)
-            headers['api-version'] = api_version
-
-            if is_responses:
-                payload = convert_to_responses_payload(payload)
-                request_url = f'{request_url}/responses?api-version={api_version}'
-            else:
-                request_url = f'{request_url}/chat/completions?api-version={api_version}'
+    if is_responses:
+        payload = convert_to_responses_payload(payload)
+        request_url = f'{url}/responses'
     else:
-        if is_responses:
-            payload = convert_to_responses_payload(payload)
-            request_url = f'{url}/responses'
-        else:
-            request_url = f'{url}/chat/completions'
+        request_url = f'{url}/chat/completions'
     requested_model = payload.get('model')
     # For Chat Completions, strip image parts from multimodal tool messages
     # (Chat Completions doesn't support images in tool content).
@@ -1714,25 +1397,7 @@ async def embeddings(request: Request, form_data: dict, user):
 
     headers, cookies = await get_headers_and_cookies(request, url, key, api_config, user=user)
 
-    if api_config.get('azure') or api_config.get('provider') == 'azure':
-        # Only set api-key header if not using Azure Entra ID authentication
-        auth_type = api_config.get('auth_type', 'bearer')
-        if auth_type not in ('azure_ad', 'microsoft_entra_id'):
-            headers['api-key'] = key
-
-        # Azure v1 format: base URL already ends with /openai/v1,
-        # model stays in the payload, no deployment URL rewriting.
-        is_azure_v1 = bool(re.search(r'/openai/v1(?:/|$)', url))
-
-        if is_azure_v1:
-            embeddings_url = f'{url.rstrip("/")}/embeddings'
-        else:
-            api_version = api_config.get('api_version', '2023-03-15-preview')
-            model = _sanitize_model_for_url(form_data.get('model', ''))
-            embeddings_url = f'{url}/openai/deployments/{model}/embeddings?api-version={api_version}'
-            headers['api-version'] = api_version
-    else:
-        embeddings_url = f'{url}/embeddings'
+    embeddings_url = f'{url}/embeddings'
     requested_model = form_data.get('model')
 
     try:
@@ -1848,22 +1513,7 @@ async def responses(
     try:
         headers, cookies = await get_headers_and_cookies(request, url, key, api_config, user=user)
 
-        if api_config.get('azure') or api_config.get('provider') == 'azure':
-            auth_type = api_config.get('auth_type', 'bearer')
-            if auth_type not in ('azure_ad', 'microsoft_entra_id'):
-                headers['api-key'] = key
-
-            is_azure_v1 = bool(re.search(r'/openai/v1(?:/|$)', url))
-
-            if is_azure_v1:
-                request_url = f'{url.rstrip("/")}/responses'
-            else:
-                api_version = api_config.get('api_version', '2023-03-15-preview')
-                headers['api-version'] = api_version
-                model = _sanitize_model_for_url(payload.get('model', ''))
-                request_url = f'{url}/openai/deployments/{model}/responses?api-version={api_version}'
-        else:
-            request_url = f'{url}/responses'
+        request_url = f'{url}/responses'
 
         session = await get_session()
         r = await session.request(
@@ -1966,28 +1616,7 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
     try:
         headers, cookies = await get_headers_and_cookies(request, url, key, api_config, user=user)
 
-        if api_config.get('azure') or api_config.get('provider') == 'azure':
-            # Only set api-key header if not using Azure Entra ID authentication
-            auth_type = api_config.get('auth_type', 'bearer')
-            if auth_type not in ('azure_ad', 'microsoft_entra_id'):
-                headers['api-key'] = key
-
-            is_azure_v1 = bool(re.search(r'/openai/v1(?:/|$)', url))
-
-            if is_azure_v1:
-                qs = request.url.query
-                request_url = f'{url.rstrip("/")}/{path}' + (f'?{qs}' if qs else '')
-            else:
-                api_version = api_config.get('api_version', '2023-03-15-preview')
-                headers['api-version'] = api_version
-
-                payload = JSONCodec.loads(body)
-                url, payload = convert_to_azure_payload(url, payload, api_version)
-                body = JSONCodec.dumps(payload).encode()
-
-                request_url = f'{url}/{path}?api-version={api_version}'
-        else:
-            request_url = f'{url}/{path}'
+        request_url = f'{url}/{path}'
 
         session = await get_session()
         r = await session.request(

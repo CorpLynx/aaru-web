@@ -5,7 +5,6 @@ import hashlib
 import logging
 import os
 import re
-import time
 from typing import Awaitable, Optional, Union
 from urllib.parse import quote
 
@@ -188,9 +187,6 @@ async def get_content_from_url(request, url: str, *, config: dict | None = None)
             'rag.docling_api_key',
             'rag.docling_params',
             'rag.docling_server_url',
-            'rag.document_intelligence_endpoint',
-            'rag.document_intelligence_key',
-            'rag.document_intelligence_model',
             'web.loader.ssl_verification',
             'web.search.exa_api_key',
             'rag.external_document_loader_api_key',
@@ -211,9 +207,6 @@ async def get_content_from_url(request, url: str, *, config: dict | None = None)
             'rag.mineru_api_url',
             'rag.mineru_file_extensions',
             'rag.mineru_params',
-            'rag.mistral_ocr_api_base_url',
-            'rag.mistral_ocr_api_key',
-            'rag.mistral_ocr_use_base64',
             'rag.paddleocr_vl_base_url',
             'rag.paddleocr_vl_token',
             'rag.pdf_extract_images',
@@ -891,7 +884,7 @@ async def query_collection_with_hybrid_search(
 def generate_openai_batch_embeddings(
     model: str,
     texts: list[str],
-    url: str = 'https://api.openai.com/v1',
+    url: str = '',
     key: str = '',
     prefix: str = None,
     user: UserModel = None,
@@ -921,7 +914,7 @@ def generate_openai_batch_embeddings(
 async def agenerate_openai_batch_embeddings(
     model: str,
     texts: list[str],
-    url: str = 'https://api.openai.com/v1',
+    url: str = '',
     key: str = '',
     prefix: str = None,
     user: UserModel = None,
@@ -950,88 +943,6 @@ async def agenerate_openai_batch_embeddings(
                 return [item['embedding'] for item in data['data']]
             else:
                 raise ValueError("Unexpected OpenAI embeddings response: missing 'data' key")
-
-
-def generate_azure_openai_batch_embeddings(
-    model: str,
-    texts: list[str],
-    url: str,
-    key: str = '',
-    version: str = '',
-    prefix: str = None,
-    user: UserModel = None,
-) -> list[list[float]]:
-    log.debug('generate_azure_openai_batch_embeddings:deployment %s batch size: %s', model, len(texts))
-    json_data = {'input': texts}
-    if isinstance(RAG_EMBEDDING_PREFIX_FIELD_NAME, str) and isinstance(prefix, str):
-        json_data[RAG_EMBEDDING_PREFIX_FIELD_NAME] = prefix
-
-    url = f'{url}/openai/deployments/{model}/embeddings?api-version={version}'
-
-    for _ in range(5):
-        headers = {
-            'Content-Type': 'application/json',
-            'api-key': key,
-        }
-        if ENABLE_FORWARD_USER_INFO_HEADERS and user:
-            headers = include_user_info_headers(headers, user)
-
-        r = requests.post(
-            url,
-            headers=headers,
-            json=json_data,
-        )
-        if r.status_code == 429:
-            retry = float(r.headers.get('Retry-After', '1'))
-            time.sleep(retry)
-            continue
-        r.raise_for_status()
-        data = r.json()
-        if 'data' in data:
-            return [elem['embedding'] for elem in data['data']]
-        else:
-            raise ValueError("Unexpected Azure OpenAI embeddings response: missing 'data' key")
-    raise Exception('Azure OpenAI embedding request failed: max retries (429) exceeded')
-
-
-async def agenerate_azure_openai_batch_embeddings(
-    model: str,
-    texts: list[str],
-    url: str,
-    key: str = '',
-    version: str = '',
-    prefix: str = None,
-    user: UserModel = None,
-) -> list[list[float]]:
-    log.debug('agenerate_azure_openai_batch_embeddings:deployment %s batch size: %s', model, len(texts))
-    form_data = {'input': texts}
-    if isinstance(RAG_EMBEDDING_PREFIX_FIELD_NAME, str) and isinstance(prefix, str):
-        form_data[RAG_EMBEDDING_PREFIX_FIELD_NAME] = prefix
-
-    full_url = f'{url}/openai/deployments/{model}/embeddings?api-version={version}'
-
-    headers = {
-        'Content-Type': 'application/json',
-        'api-key': key,
-    }
-    if ENABLE_FORWARD_USER_INFO_HEADERS and user:
-        headers = include_user_info_headers(headers, user)
-
-    async with aiohttp.ClientSession(
-        trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
-    ) as session:
-        async with session.post(
-            full_url,
-            headers=headers,
-            json=form_data,
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-        ) as r:
-            r.raise_for_status()
-            data = await r.json()
-            if 'data' in data:
-                return [item['embedding'] for item in data['data']]
-            else:
-                raise ValueError("Unexpected Azure OpenAI embeddings response: missing 'data' key")
 
 
 def generate_ollama_batch_embeddings(
@@ -1111,7 +1022,6 @@ def get_embedding_function(
     url,
     key,
     embedding_batch_size,
-    azure_api_version=None,
     enable_async=True,
     concurrent_requests=0,
 ) -> Awaitable:
@@ -1119,13 +1029,13 @@ def get_embedding_function(
         # Sentence transformers: CPU-bound sync operation
         async def async_embedding_function(query, prefix=None, user=None):
             if USE_SLIM:
-                raise HTTPException(503, 'Configure an external embedding engine (openai, ollama, azure_openai).')
+                raise HTTPException(503, 'Configure an external embedding engine (openai, ollama).')
             # Deferred so a missing local model degrades RAG instead of crashing boot.
             if embedding_function is None:
                 raise ValueError(
                     'No embedding model is loaded. Set RAG_EMBEDDING_MODEL to a valid '
                     'SentenceTransformer model name, or configure an external '
-                    'RAG_EMBEDDING_ENGINE (ollama, openai, azure_openai).'
+                    'RAG_EMBEDDING_ENGINE (ollama, openai).'
                 )
 
             def encode():
@@ -1139,7 +1049,7 @@ def get_embedding_function(
             return await asyncio.to_thread(encode)
 
         return async_embedding_function
-    elif embedding_engine in ['ollama', 'openai', 'azure_openai']:
+    elif embedding_engine in ['ollama', 'openai']:
         embedding_function = lambda query, prefix=None, user=None: generate_embeddings(
             engine=embedding_engine,
             model=embedding_model,
@@ -1148,7 +1058,6 @@ def get_embedding_function(
             url=url,
             key=key,
             user=user,
-            azure_api_version=azure_api_version,
         )
 
         async def async_embedding_function(query, prefix=None, user=None):
@@ -1232,20 +1141,6 @@ async def generate_embeddings(
     elif engine == 'openai':
         embeddings = await agenerate_openai_batch_embeddings(
             model, text if isinstance(text, list) else [text], url, key, prefix, user
-        )
-        if embeddings is None:
-            return None
-        return embeddings[0] if isinstance(text, str) else embeddings
-    elif engine == 'azure_openai':
-        azure_api_version = kwargs.get('azure_api_version', '')
-        embeddings = await agenerate_azure_openai_batch_embeddings(
-            model,
-            text if isinstance(text, list) else [text],
-            url,
-            key,
-            azure_api_version,
-            prefix,
-            user,
         )
         if embeddings is None:
             return None
