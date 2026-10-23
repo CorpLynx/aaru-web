@@ -3,17 +3,13 @@
 import asyncio
 import base64
 import hashlib
-import html
 import io
 import logging
-import mimetypes
 import os
 import uuid
-import wave
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Literal, Optional
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from typing import Optional
 
 import aiofiles
 import aiohttp
@@ -30,8 +26,6 @@ from fastapi import (
 from fastapi.responses import FileResponse
 from open_webui.config import (
     CACHE_DIR,
-    DEFAULT_REALTIME_TTS_PROMPT_TEMPLATE,
-    ELEVENLABS_API_BASE_URL,
     WHISPER_COMPUTE_TYPE,
     WHISPER_LANGUAGE,
     WHISPER_MODEL_AUTO_UPDATE,
@@ -53,14 +47,13 @@ from open_webui.env import (
 )
 from open_webui.events import EVENTS, publish_event
 from open_webui.models.config import Config
-from open_webui.routers.audio import realtime
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.headers import include_user_info_headers
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.misc import strict_match_mime_type
 from open_webui.utils.session_pool import get_session
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 # pydub needs stdlib audioop (gone in 3.13); keep requires-python capped < 3.13
 if not USE_SLIM:
@@ -70,14 +63,11 @@ if not USE_SLIM:
 
 log = logging.getLogger(__name__)
 router = APIRouter()
-router.include_router(realtime.router)
 
 # --- Constants ---
 
 MAX_FILE_SIZE_MB: int = 20
 MAX_FILE_SIZE: int = MAX_FILE_SIZE_MB * 1024 * 1024
-AZURE_MAX_FILE_SIZE_MB: int = 200
-AZURE_MAX_FILE_SIZE: int = AZURE_MAX_FILE_SIZE_MB * 1024 * 1024
 
 SPEECH_CACHE_DIR = CACHE_DIR / 'audio' / 'speech'
 SPEECH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -90,26 +80,7 @@ TTS_CONFIG_KEYS = {
     'ENGINE': 'audio.tts.engine',
     'MODEL': 'audio.tts.model',
     'VOICE': 'audio.tts.voice',
-    'REALTIME_TTS_PROMPT_TEMPLATE': 'audio.tts.realtime.prompt_template',
     'SPLIT_ON': 'audio.tts.split_on',
-    'AZURE_SPEECH_REGION': 'audio.tts.azure.speech_region',
-    'AZURE_SPEECH_BASE_URL': 'audio.tts.azure.speech_base_url',
-    'AZURE_SPEECH_OUTPUT_FORMAT': 'audio.tts.azure.speech_output_format',
-    'MISTRAL_API_KEY': 'audio.tts.mistral.api_key',
-    'MISTRAL_API_BASE_URL': 'audio.tts.mistral.api_base_url',
-}
-
-REALTIME_CONFIG_KEYS = {
-    'ENABLED': 'audio.realtime.enabled',
-    'PROVIDER': 'audio.realtime.provider',
-    'AUTH_TYPE': 'audio.realtime.auth_type',
-    'OPENAI_API_BASE_URL': 'audio.realtime.openai.api_base_url',
-    'OPENAI_API_KEY': 'audio.realtime.openai.api_key',
-    'MODEL': 'audio.realtime.model',
-    'VOICE': 'audio.realtime.voice',
-    'TRANSCRIPTION_MODEL': 'audio.realtime.transcription_model',
-    'INPUT_PARAMS': 'audio.realtime.input_params',
-    'REALTIME_CALL_PROMPT_TEMPLATE': 'audio.realtime.prompt_template',
 }
 
 STT_CONFIG_KEYS = {
@@ -121,15 +92,6 @@ STT_CONFIG_KEYS = {
     'SUPPORTED_CONTENT_TYPES': 'audio.stt.supported_content_types',
     'ALLOWED_EXTENSIONS': 'audio.stt.allowed_extensions',
     'WHISPER_MODEL': 'audio.stt.whisper_model',
-    'DEEPGRAM_API_KEY': 'audio.stt.deepgram.api_key',
-    'AZURE_API_KEY': 'audio.stt.azure.api_key',
-    'AZURE_REGION': 'audio.stt.azure.region',
-    'AZURE_LOCALES': 'audio.stt.azure.locales',
-    'AZURE_BASE_URL': 'audio.stt.azure.base_url',
-    'AZURE_MAX_SPEAKERS': 'audio.stt.azure.max_speakers',
-    'MISTRAL_API_KEY': 'audio.stt.mistral.api_key',
-    'MISTRAL_API_BASE_URL': 'audio.stt.mistral.api_base_url',
-    'MISTRAL_USE_CHAT_COMPLETIONS': 'audio.stt.mistral.use_chat_completions',
 }
 
 
@@ -265,13 +227,7 @@ class TTSConfigForm(BaseModel):
     ENGINE: str
     MODEL: str
     VOICE: str
-    REALTIME_TTS_PROMPT_TEMPLATE: Optional[str] = None
     SPLIT_ON: str
-    AZURE_SPEECH_REGION: str
-    AZURE_SPEECH_BASE_URL: str
-    AZURE_SPEECH_OUTPUT_FORMAT: str
-    MISTRAL_API_KEY: str
-    MISTRAL_API_BASE_URL: str
 
 
 class STTConfigForm(BaseModel):
@@ -283,40 +239,16 @@ class STTConfigForm(BaseModel):
     SUPPORTED_CONTENT_TYPES: list[str] = []
     ALLOWED_EXTENSIONS: list[str] = []
     WHISPER_MODEL: str
-    DEEPGRAM_API_KEY: str
-    AZURE_API_KEY: str
-    AZURE_REGION: str
-    AZURE_LOCALES: str
-    AZURE_BASE_URL: str
-    AZURE_MAX_SPEAKERS: str
-    MISTRAL_API_KEY: str
-    MISTRAL_API_BASE_URL: str
-    MISTRAL_USE_CHAT_COMPLETIONS: bool
-
-
-class RealtimeConfigForm(BaseModel):
-    ENABLED: bool = False
-    PROVIDER: Literal['openai', 'azure'] = 'openai'
-    AUTH_TYPE: Literal['api_key', 'microsoft_entra_id'] = 'api_key'
-    OPENAI_API_BASE_URL: str = 'https://api.openai.com/v1'
-    OPENAI_API_KEY: str = ''
-    MODEL: str = Field(default='gpt-realtime-2.1-mini', min_length=1, max_length=200)
-    VOICE: str = Field(default='marin', min_length=1, max_length=200)
-    TRANSCRIPTION_MODEL: str = Field(default='gpt-transcribe', min_length=1, max_length=200)
-    INPUT_PARAMS: Optional[dict] = None
-    REALTIME_CALL_PROMPT_TEMPLATE: Optional[str] = None
 
 
 class AudioConfigUpdateForm(BaseModel):
     tts: TTSConfigForm
     stt: STTConfigForm
-    realtime: Optional[RealtimeConfigForm] = None
 
 
 @router.get('/config')
 async def get_audio_config(request: Request, user=Depends(get_admin_user)):
     return {
-        'realtime': await get_config_values(REALTIME_CONFIG_KEYS),
         'tts': await get_config_values(TTS_CONFIG_KEYS),
         'stt': await get_config_values(STT_CONFIG_KEYS),
     }
@@ -332,11 +264,6 @@ async def update_audio_config(request: Request, form_data: AudioConfigUpdateForm
             raise HTTPException(400, 'Local TTS is unavailable in slim. Select an external text-to-speech engine.')
     await Config.upsert(
         {
-            **(
-                config_updates(form_data.realtime.model_dump(exclude_unset=True), REALTIME_CONFIG_KEYS)
-                if form_data.realtime
-                else {}
-            ),
             **config_updates(form_data.tts.model_dump(exclude_unset=True), TTS_CONFIG_KEYS),
             **config_updates(form_data.stt.model_dump(exclude_unset=True), STT_CONFIG_KEYS),
         }
@@ -481,198 +408,6 @@ async def _tts_openai(request, payload, file_path, file_body_path, user):
         await _raise_tts_error(exc, r)
 
 
-async def _tts_openai_realtime(request, payload, file_path, file_body_path, user):
-    """Generate speech via the OpenAI Realtime API."""
-    api_key = await Config.get('audio.tts.openai.api_key')
-    if not isinstance(api_key, str) or not api_key.strip():
-        raise HTTPException(400, 'Configure an OpenAI Realtime API key.')
-    url = urlsplit(payload['api_base_url'])
-    ws_url = urlunsplit(
-        (
-            'wss' if url.scheme == 'https' else 'ws',
-            url.netloc,
-            f'{url.path}/realtime',
-            urlencode({'model': payload['model']}),
-            '',
-        )
-    )
-    headers = {'Authorization': f'Bearer {api_key}'}
-    if ENABLE_FORWARD_USER_INFO_HEADERS:
-        headers = include_user_info_headers(headers, user)
-
-    try:
-        async with asyncio.timeout(120):
-            session = await get_session()
-            async with asyncio.timeout(15):
-                ws = await session.ws_connect(ws_url, headers=headers, ssl=AIOHTTP_CLIENT_SESSION_SSL)
-            async with ws:
-                pcm = bytearray()
-                response_id = None
-                async for message in ws:
-                    if message.type == aiohttp.WSMsgType.ERROR:
-                        raise HTTPException(502, 'OpenAI Realtime WebSocket failed.')
-                    if message.type != aiohttp.WSMsgType.TEXT:
-                        continue
-                    event = message.json()
-                    event_type = event['type']
-                    if event_type == 'error':
-                        # Provider messages may contain input text or credentials.
-                        raise HTTPException(502, 'OpenAI Realtime rejected synthesis. Check the model, voice, and key.')
-                    if event_type == 'session.created':
-                        await ws.send_json(
-                            {
-                                'type': 'session.update',
-                                'session': {
-                                    'type': 'realtime',
-                                    'output_modalities': ['audio'],
-                                    'audio': {
-                                        'input': {'turn_detection': None, 'transcription': None},
-                                        'output': {
-                                            'format': {'type': 'audio/pcm', 'rate': 24000},
-                                            'voice': payload['voice'],
-                                        },
-                                    },
-                                    'tools': [],
-                                    'tool_choice': 'none',
-                                    'instructions': payload['instructions'],
-                                },
-                            }
-                        )
-                    elif event_type == 'session.updated':
-                        await ws.send_json(
-                            {
-                                'type': 'response.create',
-                                'response': {
-                                    'conversation': 'none',
-                                    'output_modalities': ['audio'],
-                                    'tools': [],
-                                    'tool_choice': 'none',
-                                    'instructions': payload['instructions'],
-                                    'input': [
-                                        {
-                                            'type': 'message',
-                                            'role': 'user',
-                                            'content': [{'type': 'input_text', 'text': payload['input']}],
-                                        }
-                                    ],
-                                },
-                            }
-                        )
-                    elif event_type == 'response.created':
-                        response_id = event['response']['id']
-                    elif event_type == 'response.output_audio.delta' and response_id:
-                        if event.get('response_id') == response_id:
-                            pcm.extend(base64.b64decode(event['delta'], validate=True))
-                    elif event_type == 'response.done' and response_id:
-                        response = event['response']
-                        if response['id'] != response_id:
-                            continue
-                        if response['status'] != 'completed':
-                            raise HTTPException(502, 'OpenAI Realtime speech generation did not complete.')
-                        if not pcm or len(pcm) % 2:
-                            raise HTTPException(502, 'OpenAI Realtime returned empty or invalid PCM audio.')
-                        break
-                else:
-                    raise HTTPException(502, 'OpenAI Realtime closed before speech generation completed.')
-    except TimeoutError:
-        raise HTTPException(504, 'OpenAI Realtime speech synthesis timed out.') from None
-    except aiohttp.WSServerHandshakeError as exc:
-        raise HTTPException(502, f'OpenAI Realtime connection rejected (HTTP {exc.status}).') from None
-    except aiohttp.ClientError:
-        raise HTTPException(502, 'Could not connect to OpenAI Realtime.') from None
-    except (ValueError, KeyError, TypeError):
-        raise HTTPException(502, 'OpenAI Realtime returned invalid audio or event data.') from None
-
-    audio = io.BytesIO()
-    with wave.open(audio, 'wb') as wav:
-        wav.setnchannels(1)
-        wav.setsampwidth(2)
-        wav.setframerate(24000)
-        wav.writeframes(pcm)
-
-    # Publish only complete files; simultaneous requests may synthesize the same cache key.
-    temporary_path = file_path.with_name(f'{file_path.name}.{uuid.uuid4().hex}.tmp')
-    try:
-        async with aiofiles.open(temporary_path, 'wb') as f:
-            await f.write(audio.getvalue())
-        os.replace(temporary_path, file_path)
-    finally:
-        temporary_path.unlink(missing_ok=True)
-    return FileResponse(file_path, media_type='audio/wav')
-
-
-async def _tts_elevenlabs(request, payload, file_path, file_body_path, user):
-    """Generate speech via the ElevenLabs TTS API."""
-    voice_id = (payload.get('voice') or '').strip()
-    if not voice_id:
-        raise HTTPException(status_code=400, detail='Invalid voice id')
-
-    available_voices = await get_available_voices(request)
-    if available_voices and voice_id not in available_voices:
-        raise HTTPException(status_code=400, detail='Invalid voice id')
-
-    r = None
-    try:
-        session = await get_session()
-        async with session.post(
-            f'{ELEVENLABS_API_BASE_URL}/v1/text-to-speech/{voice_id}',
-            json={
-                'text': payload['input'],
-                'model_id': await Config.get('audio.tts.model'),
-                'voice_settings': {'stability': 0.5, 'similarity_boost': 0.5},
-            },
-            headers={
-                'Accept': 'audio/mpeg',
-                'Content-Type': 'application/json',
-                'xi-api-key': await Config.get('audio.tts.api_key'),
-            },
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-        ) as r:
-            r.raise_for_status()
-            content_type = r.headers.get('Content-Type', 'audio/mpeg')
-            await _write_tts_cache(file_path, await r.read(), file_body_path, payload, content_type)
-        return FileResponse(file_path, media_type=content_type if USE_SLIM else None)
-    except Exception as exc:
-        log.exception(exc)
-        await _raise_tts_error(exc, r)
-
-
-async def _tts_azure(request, payload, file_path, file_body_path, user):
-    """Generate speech via Azure Cognitive Services TTS."""
-    az_region = await Config.get('audio.tts.azure.speech_region') or 'eastus'
-    az_base = await Config.get('audio.tts.azure.speech_base_url')
-    language = payload.get('voice') or await Config.get('audio.tts.voice')
-    locale = '-'.join(language.split('-')[:2])
-    output_format = await Config.get('audio.tts.azure.speech_output_format')
-
-    ssml = (
-        f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{html.escape(locale)}">'
-        f'<voice name="{html.escape(language)}">{html.escape(payload["input"])}</voice>'
-        f'</speak>'
-    )
-
-    r = None
-    try:
-        session = await get_session()
-        async with session.post(
-            (az_base or f'https://{az_region}.tts.speech.microsoft.com') + '/cognitiveservices/v1',
-            headers={
-                'Ocp-Apim-Subscription-Key': await Config.get('audio.tts.api_key'),
-                'Content-Type': 'application/ssml+xml',
-                'X-Microsoft-OutputFormat': output_format,
-            },
-            data=ssml,
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-        ) as r:
-            r.raise_for_status()
-            content_type = r.headers.get('Content-Type', 'audio/mpeg')
-            await _write_tts_cache(file_path, await r.read(), file_body_path, payload, content_type)
-        return FileResponse(file_path, media_type=content_type if USE_SLIM else None)
-    except Exception as exc:
-        log.exception(exc)
-        await _raise_tts_error(exc, r)
-
-
 async def _tts_transformers(request, payload, file_path, file_body_path, user):
     """Generate speech via the local HuggingFace SpeechT5 pipeline (thread-offloaded)."""
     if USE_SLIM:
@@ -709,53 +444,10 @@ async def _tts_transformers(request, payload, file_path, file_body_path, user):
     return FileResponse(file_path)
 
 
-async def _tts_mistral(request, payload, file_path, file_body_path, user):
-    """Generate speech via the Mistral TTS API."""
-    api_key = await Config.get('audio.tts.mistral.api_key')
-    api_base_url = await Config.get('audio.tts.mistral.api_base_url') or 'https://api.mistral.ai/v1'
-
-    if not api_key:
-        raise HTTPException(status_code=400, detail='Mistral API key is required for Mistral TTS')
-
-    r = None
-    try:
-        session = await get_session()
-        r = await session.post(
-            url=f'{api_base_url}/audio/speech',
-            json={
-                'input': payload.get('input', ''),  # text to synthesize
-                'model': await Config.get('audio.tts.model') or 'voxtral-mini-tts-2603',
-                'voice_id': payload.get('voice', ''),
-                'response_format': 'mp3',
-            },
-            headers={
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {api_key}',
-            },
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-        )
-        r.raise_for_status()
-
-        res = await r.json()
-        audio_b64 = res.get('audio_data', '')
-        if not audio_b64:
-            raise ValueError('No audio_data in Mistral TTS response')
-
-        await _write_tts_cache(file_path, base64.b64decode(audio_b64), file_body_path, payload)
-        return FileResponse(file_path)
-    except Exception as exc:
-        log.exception(exc)
-        await _raise_tts_error(exc, r)
-
-
 # Dispatcher map: engine name -> handler
 _TTS_ENGINES = {
     'openai': _tts_openai,
-    'openai-realtime': _tts_openai_realtime,
-    'elevenlabs': _tts_elevenlabs,
-    'azure': _tts_azure,
     'transformers': _tts_transformers,
-    'mistral': _tts_mistral,
 }
 
 
@@ -778,49 +470,14 @@ async def speech(request: Request, user=Depends(get_verified_user)):
 
     body = await request.body()
     payload = None
-    if engine == 'openai-realtime':
-        try:
-            payload = JSONCodec.loads(body)
-        except (ValueError, TypeError):
-            raise HTTPException(400, 'Invalid JSON payload') from None
-        if not isinstance(payload, dict):
-            raise HTTPException(400, 'Speech payload must be an object.')
-        text = payload.get('input')
-        if not isinstance(text, str) or not text.strip():
-            raise HTTPException(400, 'Speech input must be nonempty text.')
-        model = await Config.get('audio.tts.model')
-        voice = payload.get('voice') or await Config.get('audio.tts.voice')
-        base_url = await Config.get('audio.tts.openai.api_base_url')
-        if not all(isinstance(value, str) and value.strip() for value in (model, voice, base_url)):
-            raise HTTPException(400, 'Configure the OpenAI Realtime model, voice, and API base URL.')
-        base_url = base_url.strip().rstrip('/')
-        try:
-            url = urlsplit(base_url)
-            valid = (
-                url.scheme in ('http', 'https')
-                and url.hostname
-                and not (url.username or url.password or url.query or url.fragment)
-            )
-            url.port  # Validate a configured port before connecting.
-        except ValueError:
-            valid = False
-        if not valid:
-            raise HTTPException(400, 'OpenAI Realtime requires an HTTP(S) API base URL without credentials or a query.')
-        payload = {'input': text, 'model': model.strip(), 'voice': voice.strip(), 'api_base_url': base_url}
-        payload['instructions'] = (
-            await Config.get('audio.tts.realtime.prompt_template') or DEFAULT_REALTIME_TTS_PROMPT_TEMPLATE
-        )
-        name = hashlib.sha256(JSONCodec.dumps({'engine': engine, **payload}).encode('utf-8')).hexdigest()
-    else:
-        name = hashlib.sha256(
-            body
-            + str(engine).encode('utf-8')
-            + str(await Config.get('audio.tts.model')).encode('utf-8')
-            + (b':slim' if USE_SLIM else b'')
-        ).hexdigest()
+    name = hashlib.sha256(
+        body
+        + str(engine).encode('utf-8')
+        + str(await Config.get('audio.tts.model')).encode('utf-8')
+        + (b':slim' if USE_SLIM else b'')
+    ).hexdigest()
 
-    extension = 'wav' if engine == 'openai-realtime' else 'mp3'
-    file_path = SPEECH_CACHE_DIR.joinpath(f'{name}.{extension}')
+    file_path = SPEECH_CACHE_DIR.joinpath(f'{name}.mp3')
     file_body_path = SPEECH_CACHE_DIR.joinpath(f'{name}.json')
 
     # Return cached result if available
@@ -832,18 +489,17 @@ async def speech(request: Request, user=Depends(get_verified_user)):
             subject_id=name,
             data={'engine': engine, 'cached': True},
         )
-        content_type = 'audio/wav' if engine == 'openai-realtime' else None
-        if USE_SLIM and engine != 'openai-realtime':
+        content_type = None
+        if USE_SLIM:
             async with aiofiles.open(file_path.with_suffix('.mime')) as f:
                 content_type = await f.read()
         return FileResponse(file_path, media_type=content_type)
 
-    if payload is None:
-        try:
-            payload = JSONCodec.loads(body)
-        except Exception as exc:
-            log.exception(exc)
-            raise HTTPException(status_code=400, detail='Invalid JSON payload')
+    try:
+        payload = JSONCodec.loads(body)
+    except Exception as exc:
+        log.exception(exc)
+        raise HTTPException(status_code=400, detail='Invalid JSON payload')
 
     handler = _TTS_ENGINES.get(engine)
     if handler is None:
@@ -858,7 +514,7 @@ async def speech(request: Request, user=Depends(get_verified_user)):
         data={
             'engine': engine,
             'model': payload.get('model'),
-            **({'input_preview': str(payload.get('input', ''))[:300]} if engine != 'openai-realtime' else {}),
+            'input_preview': str(payload.get('input', ''))[:300],
             'cached': False,
         },
     )
@@ -973,197 +629,6 @@ async def _transcribe_openai(request, file_path, filename, languages, file_dir, 
         raise Exception(detail if detail else 'Open WebUI: Server Connection Error')
 
 
-async def _transcribe_deepgram(request, file_path, languages, file_dir, id):
-    """Transcribe audio via the Deepgram listen API with language fallback."""
-    content_type = mimetypes.guess_type(file_path)[0] or 'audio/wav'
-
-    async with aiofiles.open(file_path, 'rb') as f:
-        audio_bytes = await f.read()
-
-    api_key = await Config.get('audio.stt.deepgram.api_key')
-    stt_model = await Config.get('audio.stt.model')
-
-    r = None
-    try:
-        session = await get_session()
-        for lang in languages:
-            query: dict = {'smart_format': 'true'}
-            if stt_model:
-                query['model'] = stt_model
-            if lang:
-                query['language'] = lang
-
-            r = await session.post(
-                'https://api.deepgram.com/v1/listen',
-                headers={'Authorization': f'Token {api_key}', 'Content-Type': content_type},
-                params=query,
-                data=audio_bytes,
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            )
-            if r.status == 200:
-                break
-
-        await r.read()
-        r.raise_for_status()
-        body = await r.json()
-
-        # Parse the Deepgram response structure
-        try:
-            transcript = body['results']['channels'][0]['alternatives'][0].get('transcript', '').strip()
-        except (KeyError, IndexError) as exc:
-            log.error(f'Malformed Deepgram response: {exc}')
-            raise Exception('Failed to parse Deepgram response') from exc
-
-        data = {'text': transcript}
-        async with aiofiles.open(os.path.join(file_dir, f'{id}.json'), 'w') as f:
-            await f.write(JSONCodec.dumps(data))
-        return data
-
-    except Exception as e:
-        log.exception(e)
-        # LICENSE covers this Open WebUI error identifier.
-        # Do not alter, remove, obscure, or replace it except as LICENSE permits:
-        # https://docs.openwebui.com/license.
-        detail = 'Open WebUI: Server Connection Error'
-        if r is not None:
-            try:
-                res = await r.json()
-                msg = (
-                    res.get('error', {}).get('message', '')
-                    if isinstance(res.get('error'), dict)
-                    else str(res.get('error', ''))
-                ) or res.get('err_msg', '')
-                if msg:
-                    detail = f'External: {msg}'
-                else:
-                    detail = f'External: {e}'
-            except Exception:
-                detail = f'External: {e}'
-        raise Exception(detail)
-
-
-async def _transcribe_azure(request, file_path, filename, file_dir, id):
-    """Transcribe audio via Azure Cognitive Services batch transcription."""
-    if not os.path.isfile(file_path):
-        raise HTTPException(status_code=400, detail='Audio file not found')
-
-    audio_size = os.path.getsize(file_path)
-    if audio_size > AZURE_MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f'File size ({audio_size // (1024 * 1024)}MB) exceeds Azure limit of {AZURE_MAX_FILE_SIZE_MB}MB',
-        )
-
-    api_key = await Config.get('audio.stt.azure.api_key')
-    region = await Config.get('audio.stt.azure.region') or 'eastus'
-    locale_str = await Config.get('audio.stt.azure.locales')
-    base_url = await Config.get('audio.stt.azure.base_url')
-    max_speakers = await Config.get('audio.stt.azure.max_speakers') or 3
-
-    # Default to a broad set of locales when none are configured
-    if len(locale_str) < 2:
-        locale_str = ','.join(
-            [
-                'en-US',
-                'es-ES',
-                'es-MX',
-                'fr-FR',
-                'hi-IN',
-                'it-IT',
-                'de-DE',
-                'en-GB',
-                'en-IN',
-                'ja-JP',
-                'ko-KR',
-                'pt-BR',
-                'zh-CN',
-            ]
-        )
-
-    if not api_key or not region:
-        raise HTTPException(status_code=400, detail='Azure API key and region are required for Azure STT')
-
-    # Build the transcription definition payload
-    definition = JSONCodec.dumps(
-        {'locales': locale_str.split(','), 'diarization': {'maxSpeakers': max_speakers, 'enabled': True}}
-        if locale_str
-        else {}
-    )
-    endpoint = (
-        base_url or f'https://{region}.api.cognitive.microsoft.com'
-    ) + '/speechtotext/transcriptions:transcribe?api-version=2024-11-15'
-
-    r = None
-    try:
-        session = await get_session()
-        form_data = aiohttp.FormData()
-        form_data.add_field('definition', definition)
-
-        async def audio_chunks():
-            async with aiofiles.open(file_path, 'rb') as audio_file:
-                while chunk := await audio_file.read(AIOHTTP_FILE_STREAM_CHUNK_SIZE):
-                    yield chunk
-
-        form_data.add_field('audio', audio_chunks(), filename=filename)
-        r = await session.post(
-            url=endpoint,
-            data=form_data,
-            headers={'Ocp-Apim-Subscription-Key': api_key},
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-        )
-        r.raise_for_status()
-        response = await r.json()
-
-        if not response.get('combinedPhrases'):
-            raise ValueError('No transcription found in response')
-
-        transcript = response['combinedPhrases'][0].get('text', '').strip()
-        if not transcript:
-            raise ValueError('Empty transcript in response')
-
-        data = {'text': transcript}
-
-        async with aiofiles.open(os.path.join(file_dir, f'{id}.json'), 'w') as f:
-            await f.write(JSONCodec.dumps(data))
-
-        log.debug(data)
-        return data
-
-    except (KeyError, IndexError, ValueError) as e:
-        log.exception('Error parsing Azure response')
-        raise HTTPException(status_code=500, detail=f'Failed to parse Azure response: {str(e)}')
-    except aiohttp.ClientResponseError as e:
-        log.exception(e)
-        detail = None
-        try:
-            if r is not None and r.status != 200:
-                res = await r.json()
-                if 'code' in res and 'message' in res:
-                    azure_code = res.get('innerError', {}).get('code', res['code'])
-                    user_facing_codes = {
-                        'EmptyAudioFile',
-                        'AudioLengthLimitExceeded',
-                        'NoLanguageIdentified',
-                        'MultipleLanguagesIdentified',
-                    }
-                    if azure_code in user_facing_codes:
-                        detail = res['message']
-                    else:
-                        log.error(f'Azure STT error [{azure_code}]: {res["message"]}')
-                        detail = 'An error occurred during transcription.'
-                elif 'error' in res:
-                    detail = f'External: {res["error"].get("message", "")}'
-        except Exception:
-            detail = f'External: {e}'
-        # LICENSE covers this Open WebUI error identifier.
-        # Do not alter, remove, obscure, or replace it except as LICENSE permits:
-        # https://docs.openwebui.com/license.
-        raise HTTPException(
-            status_code=e.status if e.status else 500,
-            detail=detail if detail else 'Open WebUI: Server Connection Error',
-        )
-
-
 async def transcription_handler(request, file_path, metadata, user=None):
     filename = os.path.basename(file_path)
     file_dir = os.path.dirname(file_path)
@@ -1180,161 +645,6 @@ async def transcription_handler(request, file_path, metadata, user=None):
         return await _transcribe_whisper(request, file_path, languages, file_dir, id)
     elif await Config.get('audio.stt.engine') == 'openai':
         return await _transcribe_openai(request, file_path, filename, languages, file_dir, id, user)
-    elif await Config.get('audio.stt.engine') == 'deepgram':
-        return await _transcribe_deepgram(request, file_path, languages, file_dir, id)
-    elif await Config.get('audio.stt.engine') == 'azure':
-        return await _transcribe_azure(request, file_path, filename, file_dir, id)
-
-    elif await Config.get('audio.stt.engine') == 'mistral':
-        return await _transcribe_mistral(request, file_path, filename, metadata, file_dir, id)
-
-
-async def _transcribe_mistral(request, file_path, filename, metadata, file_dir, id):
-    """Transcribe audio via the Mistral STT API."""
-    if not os.path.isfile(file_path):
-        raise HTTPException(status_code=400, detail='Audio file not found')
-
-    file_size = os.path.getsize(file_path)
-    if file_size > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail=f'File size exceeds limit of {MAX_FILE_SIZE_MB}MB')
-
-    api_key = await Config.get('audio.stt.mistral.api_key')
-    api_base_url = await Config.get('audio.stt.mistral.api_base_url') or 'https://api.mistral.ai/v1'
-    use_chat_completions = await Config.get('audio.stt.mistral.use_chat_completions')
-
-    if not api_key:
-        raise HTTPException(status_code=400, detail='Mistral API key is required for Mistral STT')
-
-    r = None
-    try:
-        model = await Config.get('audio.stt.model') or 'voxtral-mini-latest'
-        log.info(
-            'Mistral STT - model: %s, method: %s',
-            model,
-            'chat_completions' if use_chat_completions else 'transcriptions',
-        )
-
-        session = await get_session()
-        if use_chat_completions:
-            audio_file_to_use = file_path
-            if USE_SLIM and Path(filename).suffix.lower() not in ('.mp3', '.wav'):
-                raise HTTPException(
-                    400, 'Mistral chat transcription requires MP3 or WAV in slim; local conversion is unavailable.'
-                )
-            if not BYPASS_PYDUB_PREPROCESSING and is_audio_conversion_required(file_path):
-                log.debug('Converting audio to mp3 for chat completions API')
-                converted_path = await asyncio.to_thread(convert_audio_to_mp3, file_path)
-                if converted_path:
-                    audio_file_to_use = converted_path
-                else:
-                    log.error('Audio conversion failed')
-                    raise HTTPException(
-                        status_code=500,
-                        detail='Audio conversion failed. Chat completions API requires mp3 or wav format.',
-                    )
-
-            async with aiofiles.open(audio_file_to_use, 'rb') as audio_file:
-                raw = await audio_file.read()
-                audio_base64 = {
-                    'data': base64.b64encode(raw).decode('utf-8'),
-                    'format': mimetypes.guess_extension(mimetypes.guess_type(audio_file_to_use)[0]).lstrip('.'),
-                }
-
-            language = metadata.get('language', None) if metadata else None
-            text_instruction = (
-                f'Transcribe this audio exactly as spoken in {language}. Do not translate it.'
-                if language
-                else 'Transcribe this audio exactly as spoken in its original language. Do not translate it to another language.'
-            )
-
-            payload = {
-                'model': model,
-                'messages': [
-                    {
-                        'role': 'user',
-                        'content': [
-                            {'type': 'input_audio', 'input_audio': audio_base64},
-                            {'type': 'text', 'text': text_instruction},
-                        ],
-                    }
-                ],
-            }
-
-            r = await session.post(
-                url=f'{api_base_url}/chat/completions',
-                json=payload,
-                headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            )
-            r.raise_for_status()
-            response = await r.json()
-
-            transcript = response.get('choices', [{}])[0].get('message', {}).get('content', '').strip()
-            if not transcript:
-                raise ValueError('Empty transcript in response')
-            data = {'text': transcript}
-
-        else:
-            mime_type, _ = mimetypes.guess_type(file_path)
-            if not mime_type:
-                mime_type = 'audio/webm'
-
-            form_data = aiohttp.FormData()
-            form_data.add_field('model', model)
-
-            language = metadata.get('language', None) if metadata else None
-            if language:
-                form_data.add_field('language', language)
-
-            async def audio_chunks():
-                async with aiofiles.open(file_path, 'rb') as audio_file:
-                    while chunk := await audio_file.read(AIOHTTP_FILE_STREAM_CHUNK_SIZE):
-                        yield chunk
-
-            form_data.add_field('file', audio_chunks(), filename=filename, content_type=mime_type)
-
-            r = await session.post(
-                url=f'{api_base_url}/audio/transcriptions',
-                data=form_data,
-                headers={'Authorization': f'Bearer {api_key}'},
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            )
-            r.raise_for_status()
-            response = await r.json()
-
-            transcript = response.get('text', '').strip()
-            if not transcript:
-                raise ValueError('Empty transcript in response')
-            data = {'text': transcript}
-
-        async with aiofiles.open(os.path.join(file_dir, f'{id}.json'), 'w') as f:
-            await f.write(JSONCodec.dumps(data))
-
-        log.debug(data)
-        return data
-
-    except ValueError as e:
-        log.exception('Error parsing Mistral response')
-        raise HTTPException(status_code=500, detail=f'Failed to parse Mistral response: {str(e)}')
-    except aiohttp.ClientResponseError as e:
-        log.exception(e)
-        detail = None
-        try:
-            if r is not None and r.status != 200:
-                res = await r.json()
-                if 'error' in res:
-                    detail = f'External: {res["error"].get("message", "")}'
-                else:
-                    detail = f'External: {await r.text()}'
-        except Exception:
-            detail = f'External: {e}'
-        # LICENSE covers this Open WebUI error identifier.
-        # Do not alter, remove, obscure, or replace it except as LICENSE permits:
-        # https://docs.openwebui.com/license.
-        raise HTTPException(
-            status_code=e.status if e.status else 500,
-            detail=detail if detail else 'Open WebUI: Server Connection Error',
-        )
 
 
 async def transcribe(request: Request, file_path: str, metadata: Optional[dict] = None, user=None):
@@ -1554,57 +864,29 @@ async def get_available_models(request: Request) -> list[dict]:
 
     if engine == 'openai':
         base_url = await Config.get('audio.tts.openai.api_base_url')
-        if not base_url.startswith('https://api.openai.com'):
-            session = await get_session()
+        session = await get_session()
+        try:
+            async with session.get(
+                f'{base_url}/audio/models',
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                timeout=_timeout,
+            ) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                available_models = data.get('models', [])
+        except Exception as e:
+            log.debug('/audio/models not available, trying /models fallback: %s', e)
             try:
                 async with session.get(
-                    f'{base_url}/audio/models',
+                    f'{base_url}/models',
                     ssl=AIOHTTP_CLIENT_SESSION_SSL,
                     timeout=_timeout,
                 ) as resp:
                     resp.raise_for_status()
                     data = await resp.json()
-                    available_models = data.get('models', [])
-            except Exception as e:
-                log.debug('/audio/models not available, trying /models fallback: %s', e)
-                try:
-                    async with session.get(
-                        f'{base_url}/models',
-                        ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                        timeout=_timeout,
-                    ) as resp:
-                        resp.raise_for_status()
-                        data = await resp.json()
-                        available_models = data.get('data', data.get('models', []))
-                except Exception as e2:
-                    log.error(f'Error fetching models from custom endpoint: {e2}')
-                    available_models = [{'id': 'tts-1'}, {'id': 'tts-1-hd'}]
-        else:
-            available_models = [{'id': 'tts-1'}, {'id': 'tts-1-hd'}]
-
-    elif engine == 'openai-realtime':
-        available_models = [{'id': 'gpt-realtime-2.1-mini'}, {'id': 'gpt-realtime-2.1'}]
-
-    elif engine == 'elevenlabs':
-        try:
-            session = await get_session()
-            async with session.get(
-                f'{ELEVENLABS_API_BASE_URL}/v1/models',
-                headers={
-                    'xi-api-key': await Config.get('audio.tts.api_key'),
-                    'Content-Type': 'application/json',
-                },
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                timeout=_timeout,
-            ) as resp:
-                resp.raise_for_status()
-                models = await resp.json()
-                available_models = [{'name': m['name'], 'id': m['model_id']} for m in models]
-        except Exception as e:
-            log.error(f'Error fetching models: {e}')
-
-    elif engine == 'mistral':
-        available_models = [{'id': 'voxtral-mini-tts-2603'}]
+                    available_models = data.get('data', data.get('models', []))
+            except Exception as e2:
+                log.error(f'Error fetching models from custom endpoint: {e2}')
 
     return available_models
 
@@ -1614,108 +896,25 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
     return {'models': await get_available_models(request)}
 
 
-_OPENAI_DEFAULT_VOICES = {
-    'alloy': 'alloy',
-    'echo': 'echo',
-    'fable': 'fable',
-    'onyx': 'onyx',
-    'nova': 'nova',
-    'shimmer': 'shimmer',
-}
-
-
 async def get_available_voices(request) -> dict:
     """Return ``{voice_id: voice_name}`` for the configured TTS engine."""
     engine = await Config.get('audio.tts.engine')
     _timeout = aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST)
 
-    if engine == 'openai-realtime':
-        return {
-            voice: voice
-            for voice in ('alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar')
-        }
-
     if engine == 'openai':
         base_url = await Config.get('audio.tts.openai.api_base_url')
-        if not base_url.startswith('https://api.openai.com'):
-            try:
-                session = await get_session()
-                async with session.get(
-                    f'{base_url}/audio/voices',
-                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                    timeout=_timeout,
-                ) as resp:
-                    resp.raise_for_status()
-                    data = await resp.json()
-                    return {v['id']: v['name'] for v in data.get('voices', [])}
-            except Exception as e:
-                log.error(f'Error fetching voices from custom endpoint: {e}')
-                return dict(_OPENAI_DEFAULT_VOICES)
-        return dict(_OPENAI_DEFAULT_VOICES)
-
-    if engine == 'elevenlabs':
         try:
             session = await get_session()
             async with session.get(
-                f'{ELEVENLABS_API_BASE_URL}/v1/voices',
-                headers={
-                    'xi-api-key': await Config.get('audio.tts.api_key'),
-                    'Content-Type': 'application/json',
-                },
+                f'{base_url}/audio/voices',
                 ssl=AIOHTTP_CLIENT_SESSION_SSL,
                 timeout=_timeout,
             ) as resp:
                 resp.raise_for_status()
-                voices_data = await resp.json()
-                return {v['voice_id']: v['name'] for v in voices_data.get('voices', [])}
+                data = await resp.json()
+                return {v['id']: v['name'] for v in data.get('voices', [])}
         except Exception as e:
-            log.warning(f'Error fetching ElevenLabs voices: {e}')
-            return {}
-
-    if engine == 'azure':
-        try:
-            region = await Config.get('audio.tts.azure.speech_region')
-            base_url = await Config.get('audio.tts.azure.speech_base_url')
-            url = (base_url or f'https://{region}.tts.speech.microsoft.com') + '/cognitiveservices/voices/list'
-
-            session = await get_session()
-            async with session.get(
-                url,
-                headers={'Ocp-Apim-Subscription-Key': await Config.get('audio.tts.api_key')},
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                timeout=_timeout,
-            ) as resp:
-                resp.raise_for_status()
-                voices = await resp.json()
-                return {v['ShortName']: f'{v["DisplayName"]} ({v["ShortName"]})' for v in voices}
-        except Exception as e:
-            log.error(f'Error fetching Azure voices: {e}')
-            return {}
-
-    if engine == 'mistral':
-        api_key = await Config.get('audio.tts.mistral.api_key')
-        api_base_url = await Config.get('audio.tts.mistral.api_base_url') or 'https://api.mistral.ai/v1'
-        if api_key:
-            try:
-                session = await get_session()
-                async with session.get(
-                    f'{api_base_url}/audio/voices',
-                    headers={'Authorization': f'Bearer {api_key}'},
-                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                    timeout=_timeout,
-                ) as resp:
-                    resp.raise_for_status()
-                    voices_data = await resp.json()
-                    items = voices_data.get('items', []) if isinstance(voices_data, dict) else voices_data
-                    result = {}
-                    for v in items:
-                        if isinstance(v, dict):
-                            vid = v.get('voice_id', v.get('id', ''))
-                            if vid:
-                                result[vid] = v.get('name', vid)
-                    return result
-            except Exception as e:
-                log.error(f'Error fetching Mistral voices: {e}')
+            log.error(f'Error fetching voices from custom endpoint: {e}')
 
     return {}
 

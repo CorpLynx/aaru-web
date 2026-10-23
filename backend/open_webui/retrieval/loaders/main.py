@@ -8,7 +8,6 @@ import zipfile
 import ftfy
 import requests
 from fastapi import HTTPException
-from azure.identity import DefaultAzureCredential
 from langchain_core.documents import Document
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -20,14 +19,12 @@ from open_webui.env import (
 from open_webui.retrieval.loaders.datalab_marker import DatalabMarkerLoader
 from open_webui.retrieval.loaders.external_document import ExternalDocumentLoader
 from open_webui.retrieval.loaders.local import (
-    DocumentIntelligenceLoader,
     DocxLoader,
     HTMLLoader,
     TextLoader,
     UnstructuredLoader,
 )
 from open_webui.retrieval.loaders.mineru import MinerULoader
-from open_webui.retrieval.loaders.mistral import MistralLoader
 from open_webui.retrieval.loaders.paddleocr_vl import PADDLEOCR_VL_SUPPORTED_EXTENSIONS, PaddleOCRVLLoader
 from open_webui.retrieval.loaders.pdf import PDFLoader
 from open_webui.utils.headers import get_user_groups_for_custom_headers
@@ -651,33 +648,6 @@ class Loader:
                     mime_type=file_content_type,
                     params=params,
                 )
-        elif (
-            self.engine == 'document_intelligence'
-            and self.config['rag.document_intelligence_endpoint'] != ''
-            and (
-                file_ext in ['pdf', 'docx', 'ppt', 'pptx']
-                or file_content_type
-                in [
-                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                    'application/vnd.ms-powerpoint',
-                    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-                ]
-            )
-        ):
-            if self.config['rag.document_intelligence_key'] != '':
-                loader = DocumentIntelligenceLoader(
-                    file_path=file_path,
-                    api_endpoint=self.config['rag.document_intelligence_endpoint'],
-                    api_key=self.config['rag.document_intelligence_key'],
-                    api_model=self.config['rag.document_intelligence_model'],
-                )
-            else:
-                loader = DocumentIntelligenceLoader(
-                    file_path=file_path,
-                    api_endpoint=self.config['rag.document_intelligence_endpoint'],
-                    azure_credential=DefaultAzureCredential(),
-                    api_model=self.config['rag.document_intelligence_model'],
-                )
         elif self.engine == 'mineru' and file_ext in self.config['rag.mineru_file_extensions']:
             mineru_timeout = self.config['rag.mineru_api_timeout']
             if mineru_timeout:
@@ -693,18 +663,6 @@ class Loader:
                 params=self.config['rag.mineru_params'],
                 timeout=mineru_timeout,
                 max_markdown_bytes=MINERU_MAX_MARKDOWN_BYTES,
-            )
-        elif (
-            self.engine == 'mistral_ocr'
-            and self.config['rag.mistral_ocr_api_key'] != ''
-            and file_ext in ['pdf']  # Mistral OCR currently only supports PDF and images
-        ):
-            loader = MistralLoader(
-                base_url=self.config['rag.mistral_ocr_api_base_url'],
-                api_key=self.config['rag.mistral_ocr_api_key'],
-                file_path=file_path,
-                use_base64=self.config['rag.mistral_ocr_use_base64'],
-                user=self.user,
             )
         elif (
             self.engine == 'paddleocr_vl'
