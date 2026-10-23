@@ -76,8 +76,12 @@ Removed provider-specific code; OpenAI-compatible endpoints and local engines re
 | Dependencies     | `anthropic`, `azure-ai-documentintelligence`                                                                                                                                                 | `openai` (generic client), `azure-identity` (Azure Blob storage, Azure AI Search)                        |
 
 Not changed: web search providers (search services, not models), Azure Blob and GCS storage, the
-ChatGPT history importer, and database migrations. The "What's new" dialog still shows upstream's
-`CHANGELOG.md`, which describes removed features.
+ChatGPT history importer, and database migrations.
+
+### Changelog
+
+`CHANGELOG.md`, which feeds the "What's new" dialog, now records Aaru's changes. Open WebUI's
+history up to 0.12.3 moved to `docs/OPEN_WEBUI_CHANGELOG.md`, unchanged.
 
 ## Building
 
