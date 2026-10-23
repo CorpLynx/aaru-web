@@ -76,7 +76,6 @@ TTS_CONFIG_KEYS = {
     'OPENAI_API_BASE_URL': 'audio.tts.openai.api_base_url',
     'OPENAI_API_KEY': 'audio.tts.openai.api_key',
     'OPENAI_PARAMS': 'audio.tts.openai.params',
-    'API_KEY': 'audio.tts.api_key',
     'ENGINE': 'audio.tts.engine',
     'MODEL': 'audio.tts.model',
     'VOICE': 'audio.tts.voice',
@@ -223,7 +222,6 @@ class TTSConfigForm(BaseModel):
     OPENAI_API_BASE_URL: str
     OPENAI_API_KEY: str
     OPENAI_PARAMS: Optional[dict] = None
-    API_KEY: str
     ENGINE: str
     MODEL: str
     VOICE: str

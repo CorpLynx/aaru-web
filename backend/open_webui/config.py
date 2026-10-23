@@ -1577,8 +1577,6 @@ except JSONCodec.JSONDecodeError:
 AUDIO_TTS_OPENAI_PARAMS = audio_tts_openai_params
 
 
-AUDIO_TTS_API_KEY = os.getenv('AUDIO_TTS_API_KEY', '')
-
 AUDIO_TTS_ENGINE = os.getenv('AUDIO_TTS_ENGINE', '')
 
 
@@ -3017,7 +3015,6 @@ DEFAULT_CONFIG = {
     'audio.tts.openai.api_base_url': AUDIO_TTS_OPENAI_API_BASE_URL,
     'audio.tts.openai.api_key': AUDIO_TTS_OPENAI_API_KEY,
     'audio.tts.openai.params': AUDIO_TTS_OPENAI_PARAMS,
-    'audio.tts.api_key': AUDIO_TTS_API_KEY,
     'audio.tts.engine': AUDIO_TTS_ENGINE,
     'audio.tts.model': AUDIO_TTS_MODEL,
     'audio.tts.voice': AUDIO_TTS_VOICE,

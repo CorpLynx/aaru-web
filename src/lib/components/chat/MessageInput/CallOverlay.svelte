@@ -15,7 +15,6 @@
 	import VideoInputMenu from './CallOverlay/VideoInputMenu.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
-	import type { RealtimeCall } from '$lib/utils/realtime';
 	import VoiceAvatar from './CallOverlay/VoiceAvatar.svelte';
 	import type { AvatarAnimationCommand } from '$lib/utils/voice-avatar';
 
@@ -27,7 +26,6 @@
 	export let files;
 	export let chatId;
 	export let modelId;
-	export let bridge: RealtimeCall | undefined = undefined;
 
 	let model = null;
 
@@ -130,13 +128,6 @@
 
 	let videoInputDevices = [];
 	let selectedVideoInputDeviceId = null;
-
-	$: if (bridge) {
-		assistantSpeaking = bridge.speaking;
-		muted = bridge.muted;
-		loading = bridge.connecting || (bridge.working && !bridge.speaking);
-		model = $models.find((m) => m.id === modelId);
-	}
 
 	const getVideoInputDevices = async () => {
 		const devices = await navigator.mediaDevices.enumerateDevices();
@@ -581,7 +572,6 @@
 	};
 
 	const stopAllAudio = async (stopChat = true) => {
-		if (bridge) return bridge.stopSpeaking();
 		assistantSpeaking = false;
 		resetAvatarPlayback();
 		cancelAvatarAnimation();
@@ -783,7 +773,6 @@
 	};
 
 	const toggleMute = () => {
-		if (bridge) return bridge.mute();
 		muted = !muted;
 		if (muted && hasStartedSpeaking) {
 			// Abort the ongoing recording so it doesn't accidentally send a partial sentence
@@ -797,7 +786,7 @@
 	};
 
 	let wasAssistantSpeaking = false;
-	$: if (!bridge) {
+	$: {
 		if (assistantSpeaking && !wasAssistantSpeaking) {
 			wasAssistantSpeaking = true;
 		} else if (!assistantSpeaking && wasAssistantSpeaking) {
@@ -834,10 +823,6 @@
 	});
 
 	onMount(async () => {
-		if (bridge) {
-			document.addEventListener('keydown', handleKeydown);
-			return;
-		}
 		model = $models.find((m) => m.id === modelId);
 
 		if ($settings.audio?.tts?.engine === 'browser-kokoro' && !$TTSWorker) {
@@ -885,10 +870,6 @@
 	});
 
 	onDestroy(async () => {
-		if (bridge) {
-			document.removeEventListener('keydown', handleKeydown);
-			return;
-		}
 		destroyed = true;
 		resetAvatarPlayback();
 		playbackSource?.disconnect();
@@ -1149,11 +1130,7 @@
 				}}
 			>
 				<div class="line-clamp-1 text-sm font-normal" role="status" aria-live="polite">
-					{#if bridge?.connecting}
-						{$i18n.t('Connecting')}
-					{:else if bridge?.approval}
-						{$i18n.t('Waiting for approval')}
-					{:else if loading}
+					{#if loading}
 						{$i18n.t('Thinking...')}
 					{:else if muted}
 						{$i18n.t('Muted')}
@@ -1198,7 +1175,7 @@
 							</svg>
 						</button>
 					</VideoInputMenu>
-				{:else if !bridge}
+				{:else}
 					<Tooltip content={$i18n.t('Camera')}>
 						<button
 							aria-label={$i18n.t('Camera')}
@@ -1286,30 +1263,12 @@
 					</button>
 				</Tooltip>
 
-				{#if bridge?.working}
-					<Tooltip content={$i18n.t('Stop')}>
-						<button
-							type="button"
-							aria-label={$i18n.t('Stop')}
-							class="p-3 rounded-full bg-gray-50 dark:bg-gray-900"
-							on:click={() => bridge?.stopBackend()}
-						>
-							<svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-								<rect x="4" y="4" width="12" height="12" rx="2" />
-							</svg>
-						</button>
-					</Tooltip>
-				{/if}
-
 				<button
 					aria-label={$i18n.t('End call')}
 					class="p-3 rounded-full bg-gray-50 dark:bg-gray-900"
 					on:click={async () => {
-						if (bridge) bridge.end();
-						else {
-							await stopAudioStream();
-							await stopVideoStream();
-						}
+						await stopAudioStream();
+						await stopVideoStream();
 
 						showCallOverlay.set(false);
 						dispatch('close');

@@ -233,7 +233,6 @@
 	let accessGrants = [];
 	let terminalId = '';
 	let tts = { voice: '' };
-	let voice = { voice: '' };
 	export let suggestionTags: { name: string }[] = [];
 	let voices: { id: string; name?: string }[] = [];
 
@@ -482,9 +481,6 @@
 			}
 		}
 
-		if (voice.voice.trim()) modelInfo.meta.voice = { voice: voice.voice.trim() };
-		else delete modelInfo.meta.voice;
-
 		if (tts.voice !== '') {
 			if (!modelInfo.meta.tts) modelInfo.meta.tts = {};
 			modelInfo.meta.tts.voice = tts.voice;
@@ -712,7 +708,6 @@
 			builtinTools = model?.meta?.builtinTools ?? defaultMeta.builtinTools ?? {};
 			terminalId = model?.meta?.terminalId ?? '';
 			tts = { voice: model?.meta?.tts?.voice ?? '' };
-			voice = { voice: model?.meta?.voice?.voice ?? '' };
 
 			accessGrants = model?.access_grants ?? [];
 
@@ -1635,42 +1630,12 @@
 									<ModelSettingsSection
 										label={$i18n.t('Voice')}
 										description={$i18n.t(
-											'Configure the realtime voice, voice avatar, and text-to-speech voice for this model.'
+											'Configure the voice avatar and text-to-speech voice for this model.'
 										)}
-										summary={[
-											$config?.audio?.realtime?.enabled
-												? voice.voice || $i18n.t('Admin default')
-												: null,
-											voiceAvatar
-												? $i18n.t('Custom avatar')
-												: $config?.audio?.realtime?.enabled
-													? $i18n.t('Default orb')
-													: null,
-											tts.voice
-										]
+										summary={[voiceAvatar ? $i18n.t('Custom avatar') : null, tts.voice]
 											.filter(Boolean)
 											.join(' · ') || $i18n.t('Default')}
 									>
-										{#if $config?.audio?.realtime?.enabled}
-											<div
-												class="grid min-h-8 grid-cols-[7rem_minmax(0,1fr)] items-center gap-2 px-1 text-xs sm:grid-cols-[8rem_minmax(0,1fr)]"
-											>
-												<div class="flex min-w-0 items-center">
-													<label
-														for="realtime-voice-input"
-														class="self-center text-xs font-normal text-gray-600 dark:text-gray-400"
-													>
-														{$i18n.t('Realtime Voice')}
-													</label>
-												</div>
-												<TTSVoiceInput
-													className="w-full font-normal text-gray-900 dark:text-gray-100"
-													id="realtime-voice"
-													bind:value={voice.voice}
-													placeholder={$i18n.t('Admin default')}
-												/>
-											</div>
-										{/if}
 										<VoiceAvatarSettings
 											bind:value={voiceAvatar}
 											bind:file={avatarFile}
@@ -1691,7 +1656,7 @@
 												className="w-full font-normal text-gray-900 dark:text-gray-100"
 												bind:value={tts.voice}
 												{voices}
-												placeholder={$i18n.t('e.g. alloy, echo, shimmer')}
+												placeholder={$i18n.t('Admin default')}
 											/>
 										</div>
 									</ModelSettingsSection>

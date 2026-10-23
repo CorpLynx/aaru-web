@@ -51,8 +51,6 @@
 	} from '$lib/stores';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 
-	import { WEBUI_API_BASE_URL } from '$lib/constants';
-
 	import {
 		resolveDefaultModelIds,
 		convertMessagesToHistory,
@@ -70,7 +68,6 @@
 		isRasterImageContentType
 	} from '$lib/utils';
 	import { AudioQueue } from '$lib/utils/audio';
-	import { RealtimeCall, getBridgeTurnState, type BridgeSubmission } from '$lib/utils/realtime';
 	import { acquireWakeLock } from '$lib/utils/wakeLock';
 	import { routeAvatarAnimation } from '$lib/utils/voice-avatar';
 	import { createTemporaryChatId, isTemporaryChatId } from '$lib/utils/chatId';
@@ -81,7 +78,6 @@
 	} from './Messages/structuredOutput';
 
 	import {
-		addTagById,
 		archiveChatById,
 		compactChatById,
 		createNewChat,
@@ -105,8 +101,6 @@
 		updateUserSettings
 	} from '$lib/apis/users';
 	import {
-		generateTitle,
-		generateTags,
 		generateQueries,
 		chatAction,
 		generateMoACompletion,
@@ -888,7 +882,6 @@
 
 	const navigateHandler = async () => {
 		cancelBrowserInteractions();
-		bridge?.end();
 		noteChatDebug('navigateHandler start');
 		// Mark the outgoing chat as read before loading the new one.
 		// $chatId still holds the previous chat here — loadChat() updates it.
@@ -1585,7 +1578,6 @@
 			if (message) {
 				const data = event?.data?.data ?? null;
 
-				queueMicrotask(() => bridge?.update());
 				if (type === 'status') {
 					if (message?.statusHistory) {
 						message.statusHistory.push(data);
@@ -1621,8 +1613,6 @@
 							resolveBrowserInteraction(interaction, { status: 'cancelled', answers: {} });
 						}
 					}
-					message.bridgeCancelled = true;
-					bridgeCancellations.get(event.message_id)?.();
 					if (!event.shared) dismissContextCompactionToast();
 					if (data?.output) {
 						message.output = data.output;
@@ -2272,7 +2262,6 @@
 
 	const onHistoryChange = (history) => {
 		if (history) {
-			bridge?.update();
 			clearTimeout(contentsRAF);
 			contentsRAF = setTimeout(() => {
 				getContents();
@@ -2286,210 +2275,18 @@
 	$: onHistoryChange(history);
 
 	let callMode = 'current';
-	let bridge: RealtimeCall;
 	let releaseCallWakeLock = () => {};
 	const updateCallWakeLock = (active: boolean) => {
 		releaseCallWakeLock();
 		releaseCallWakeLock = active ? acquireWakeLock() : () => {};
 	};
-	$: callInProgress =
-		($showCallOverlay && callMode === 'current') || !!(bridge?.connected || bridge?.connecting);
+	$: callInProgress = $showCallOverlay && callMode === 'current';
 	$: updateCallWakeLock(callInProgress);
 	onDestroy(() => releaseCallWakeLock());
 
-	const bridgeCancellations = new Map<string, () => void>();
-	const visibleMessageText = (message: any) =>
-		getOutputText(message?.output) || removeAllDetails(message?.content ?? '');
-
-	const generateVoiceChatMetadata = async (
-		_chatId: string,
-		modelId: string,
-		content: string,
-		initialTitle: string
-	) => {
-		const token = localStorage.token;
-		const messages = [{ role: 'user', content }];
-		const autoTitle = $settings?.title?.auto ?? true;
-		const autoTags = $settings?.autoTags ?? true;
-		const title = autoTitle
-			? await generateTitle(token, modelId, messages, _chatId).catch((error) => {
-					console.error('Could not generate voice chat title', error);
-					return null;
-				})
-			: null;
-		const savedChat = await getChatById(token, _chatId);
-		if (savedChat.title === initialTitle) {
-			const updated = await updateChatById(token, _chatId, {
-				title: title || content.slice(0, 100)
-			});
-			if ($chatId === _chatId) {
-				chatTitle.set(updated.title);
-				if (embedded) await onEmbeddedChatTitle?.(_chatId, updated.title);
-			}
-			await refreshChatList(token);
-		}
-		if (autoTags) {
-			const tags = await generateTags(token, modelId, messages, _chatId);
-			for (const tag of tags) await addTagById(token, _chatId, tag);
-			allTags.set(await getAllTags(token));
-		}
-	};
-
-	const addVoiceMessage = async (
-		role: string,
-		content: string,
-		voice: any,
-		parentId: string | null = history.currentId
-	) => {
-		const branch = createMessagesList(history, history.currentId);
-		let parentIndex = branch.findIndex((entry) => entry.id === parentId);
-		// A chat answer can have been inserted while this spoken reply was being generated.
-		// Keep the reply on that branch, before the next user turn, rather than losing it as a sibling.
-		if (role === 'assistant' && parentIndex >= 0) {
-			while (branch[parentIndex + 1]?.role === 'assistant') parentIndex++;
-			parentId = branch[parentIndex].id;
-		}
-		const nextMessage = parentIndex >= 0 ? branch[parentIndex + 1] : null;
-		const id = uuidv4();
-		const message = {
-			id,
-			parentId,
-			childrenIds: [] as string[],
-			role,
-			content,
-			done: true,
-			timestamp: Math.floor(Date.now() / 1000),
-			meta: { voice },
-			...(role === 'assistant' ? { model: voice.model, modelName: voice.model, modelIdx: 0 } : {})
-		};
-		const changedMessages: Record<string, any> = { [id]: message };
-		history.messages[id] = message;
-		if (parentId && history.messages[parentId]) {
-			history.messages[parentId].childrenIds.push(id);
-			// A second transcript can arrive before the first spoken reply finishes.
-			// Insert that reply before the next user message without switching branches.
-			if (role === 'assistant' && nextMessage?.role === 'user') {
-				nextMessage.parentId = id;
-				message.childrenIds.push(nextMessage.id);
-				history.messages[parentId].childrenIds = history.messages[parentId].childrenIds.filter(
-					(childId: string) => childId !== nextMessage.id
-				);
-				changedMessages[nextMessage.id] = nextMessage;
-			}
-		}
-		if (history.currentId === parentId) history.currentId = id;
-		history = history;
-		if (!$chatId) {
-			const modelId = selectedModelIds[0];
-			const _chatId = await initChatHandler(history);
-			if (!$temporaryChatEnabled) {
-				// Realtime replies need no chat completion; start metadata work at chat creation.
-				void generateVoiceChatMetadata(_chatId, modelId, content, chat.title).catch((error) => {
-					console.error('Could not save voice chat metadata', error);
-				});
-			}
-		} else if (!$temporaryChatEnabled) {
-			// Patch only the new message, so a running backend turn keeps its current output.
-			await updateChatById(localStorage.token, $chatId, {
-				history: { currentId: history.currentId, messages: changedMessages }
-			});
-		}
-		return id;
-	};
-
-	const saveVoice = async (id: string, voice: any) => {
-		const message = history.messages[id];
-		if (!message) return;
-		const previous = message.meta?.voice ?? {};
-		const speech = new Map((previous.speech ?? []).map((item: any) => [item.item_id, item]));
-		for (const item of voice.speech ?? []) speech.set(item.item_id, item);
-		const merged = { ...previous, ...voice, speech: [...speech.values()] };
-		message.meta = { ...message.meta, voice: merged };
-		history = history;
-		if ($chatId && !$temporaryChatEnabled) {
-			const response = await fetch(`${WEBUI_API_BASE_URL}/chats/${$chatId}/messages/${id}`, {
-				method: 'POST',
-				headers: {
-					Authorization: `Bearer ${localStorage.token}`,
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({ voice: merged })
-			});
-			if (!response.ok) throw new Error('Could not save voice metadata');
-		}
-	};
-
-	onMount(() => {
-		bridge = new RealtimeCall({
-			context: () => {
-				const model =
-					selectedModelIds.length === 1
-						? $models.find((model) => model.id === selectedModelIds[0])
-						: null;
-				return {
-					chatId: isTemporaryChatId($chatId) ? undefined : $chatId || undefined,
-					modelId: model && !('direct' in model && model.direct) ? model.id : '',
-					voiceModel: $config?.audio?.realtime?.model,
-					voice: model?.info?.meta?.voice?.voice || $config?.audio?.realtime?.voice,
-					messages: createMessagesList(history, history.currentId).map((message) => {
-						const voice = message.meta?.voice;
-						const spoken = voice && message.model === voice.model && !message.output?.length;
-						const state = getBridgeTurnState(message);
-						const speech = !spoken
-							? (voice?.speech ?? [])
-									.map((item: any) => item.transcript)
-									.filter(Boolean)
-									.join('\n')
-							: '';
-						let content = visibleMessageText(message);
-						if (message.role === 'assistant') {
-							const source = spoken
-								? 'Historical voice transcript, not current task status'
-								: 'Chat model';
-							content = `[${source}; message_id=${message.id}; state=${state}]\n${state === 'completed' ? content : ''}`;
-							if (speech)
-								content += `\n[Historical voice transcript, not current task status]\n${speech}`;
-						}
-						return { role: message.role, content };
-					})
-				};
-			},
-			addMessage: addVoiceMessage,
-			submit: submitHandler,
-			message: (id) => history.messages[id],
-			visibleText: visibleMessageText,
-			saveVoice,
-			stop: async (id) => {
-				const message = history.messages[id];
-				if (!message || message.bridgeCancelled) return;
-				let timer: ReturnType<typeof setTimeout> | undefined;
-				const settled = new Promise<void>((resolve, reject) => {
-					bridgeCancellations.set(id, resolve);
-					timer = setTimeout(
-						() => reject(new Error('Backend cancellation was not confirmed')),
-						15000
-					);
-				});
-				try {
-					await Promise.all([stopResponse(false, id), settled]);
-				} finally {
-					clearTimeout(timer);
-					bridgeCancellations.delete(id);
-				}
-			},
-			change: () => {
-				bridge = bridge;
-			},
-			error: (message) => toast.error(message)
-		});
-		return () => bridge?.end();
-	});
 	beforeNavigate(() => {
-		bridge?.end();
 		pendingUrlActions = null;
 	});
-	$: if (!$user && (bridge?.connected || bridge?.connecting)) bridge.end();
-	$: if (selectedModelIds && $models && $config) bridge?.syncModel();
 
 	const dispatchCallOverlayAudio = (message, final = false) => {
 		if (message.error || !$showCallOverlay || callMode !== 'current') {
@@ -2601,12 +2398,7 @@
 			return;
 		}
 
-		if (
-			!bridge?.connected &&
-			!bridge?.connecting &&
-			!$config?.audio?.realtime?.enabled &&
-			$config?.audio?.stt?.engine === 'web'
-		) {
+		if ($config?.audio?.stt?.engine === 'web') {
 			toast.error($i18n.t('Call feature is not supported when using Web STT engine'));
 			return;
 		}
@@ -2618,7 +2410,6 @@
 	const initNewChat = async () => {
 		if ($chatId) terminalContext = null;
 		cancelBrowserInteractions();
-		bridge?.end();
 		console.log('initNewChat');
 		resetWebSearchConfirmation();
 
@@ -3508,7 +3299,6 @@
 			if (shared) return;
 			if (message.error) {
 				dismissContextCompactionToast();
-				bridge?.update();
 				await processNextInQueue(chatId);
 				return;
 			}
@@ -3519,7 +3309,7 @@
 				copyToClipboard(visibleContent);
 			}
 
-			if ($settings.responseAutoPlayback && !$showCallOverlay && !bridge?.connected) {
+			if ($settings.responseAutoPlayback && !$showCallOverlay) {
 				await tick();
 				document.getElementById(`speak-button-${message.id}`)?.click();
 			}
@@ -3555,19 +3345,13 @@
 			// Process next queued request if any
 			await processNextInQueue(chatId);
 		}
-
-		bridge?.update();
 	};
 
 	//////////////////////////
 	// Chat functions
 	//////////////////////////
 
-	const submitPrompt = async (
-		inputContent: string,
-		inputFiles: any[],
-		bridgeRequest: { userMessageId: string; modelId: string } | null = null
-	) => {
+	const submitPrompt = async (inputContent: string, inputFiles: any[]) => {
 		const _files = structuredClone(inputFiles);
 
 		chatFiles.push(
@@ -3583,7 +3367,7 @@
 		);
 
 		// Create user message
-		let userMessageId = bridgeRequest?.userMessageId ?? uuidv4();
+		let userMessageId = uuidv4();
 		let userMessage = {
 			id: userMessageId,
 			parentId: history.currentId ?? null,
@@ -3597,13 +3381,10 @@
 			models: selectedModels
 		};
 
-		// A transcribed Bridge message already exists in the same history.
-		const existingUserMessage = history.messages[userMessageId];
-		if (existingUserMessage) userMessage = { ...existingUserMessage, files: userMessage.files };
 		history.messages[userMessageId] = userMessage;
 
 		// Append messageId to childrenIds of parent message
-		if (!existingUserMessage && history.currentId !== null) {
+		if (history.currentId !== null) {
 			history.messages[history.currentId].childrenIds.push(userMessageId);
 		}
 
@@ -3617,7 +3398,7 @@
 		saveSessionSelectedModels();
 
 		return await sendMessage(history, userMessageId, {
-			modelId: bridgeRequest?.modelId ?? null
+			modelId: null
 		});
 	};
 
@@ -3761,16 +3542,8 @@
 		prompt = '';
 	};
 
-	const submitHandler = async (
-		userPrompt: string,
-		{
-			_raw = false,
-			bridge: bridgeRequest = null
-		}: { _raw?: boolean; bridge?: { userMessageId: string; modelId: string } | null } = {}
-	): Promise<BridgeSubmission> => {
+	const submitHandler = async (userPrompt: string, { _raw = false }: { _raw?: boolean } = {}) => {
 		emitTyping(false);
-		if (bridgeRequest && (selectedModelIds.length !== 1 || !bridgeRequest.modelId))
-			return { status: 'rejected' };
 
 		const _selectedModels = selectedModels.map((modelId) =>
 			$models.map((m) => m.id).includes(modelId) ? modelId : ''
@@ -3843,7 +3616,7 @@
 			webSearchActive &&
 			!webSearchConfirmed
 		) {
-			pendingWebSearchPrompt = bridgeRequest ? null : (userPrompt ?? '');
+			pendingWebSearchPrompt = userPrompt ?? '';
 			openWebSearchConfirm();
 			return { status: 'deferred' };
 		}
@@ -3854,7 +3627,6 @@
 			) ||
 			(files.length > 0 && files.some((file) => ['uploading', 'error'].includes(file.status)))
 		) {
-			if (bridgeRequest) return { status: 'deferred' };
 			chatRequestQueues.update((q) => ({
 				...q,
 				[$chatId]: [...(q[$chatId] ?? []), { id: uuidv4(), prompt: userPrompt, files }]
@@ -3868,14 +3640,9 @@
 		// Check if the assistant is still generating the main response
 		// (don't block on background tasks like title gen, follow-ups, tags)
 		const lastMessage = history.currentId ? history.messages[history.currentId] : null;
-		const isGenerating = bridgeRequest
-			? createMessagesList(history, bridgeRequest.userMessageId).some(
-					(message) => message.role === 'assistant' && !message.done
-				)
-			: lastMessage && lastMessage.role === 'assistant' && !lastMessage.done;
+		const isGenerating = lastMessage && lastMessage.role === 'assistant' && !lastMessage.done;
 
 		if (isGenerating) {
-			if (bridgeRequest) return { status: 'deferred' };
 			if ($settings?.enableMessageQueue ?? true) {
 				// Enqueue the request
 				const _files = structuredClone(files);
@@ -3903,7 +3670,7 @@
 		messageInput?.setText('');
 
 		return (
-			(await submitPrompt(userPrompt, _files, bridgeRequest)) ?? {
+			(await submitPrompt(userPrompt, _files)) ?? {
 				status: 'rejected'
 			}
 		);
@@ -4107,7 +3874,7 @@
 
 		if ($config?.features)
 			features = {
-				voice: ($showCallOverlay && callMode === 'current') || !!bridge?.connected,
+				voice: $showCallOverlay && callMode === 'current',
 				image_generation:
 					$config?.features?.enable_image_generation &&
 					($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
@@ -4491,7 +4258,6 @@
 			return;
 		eventTarget.dispatchEvent(new CustomEvent('voice:cancel_animation'));
 		cancelBrowserInteractions();
-		if (bridge?.connected && responseMessage) responseMessage.bridgeStopping = true;
 		const hasTaskIds = (taskIds?.length ?? 0) > 0;
 		const hasPendingAssistantResponse =
 			!!$chatId &&
@@ -5255,7 +5021,6 @@
 										{terminalContext}
 										{typingUsers}
 										on:typing={(event) => emitTyping(event.detail)}
-										callActive={!!(bridge?.connected || bridge?.connecting)}
 										callEnabled={!isShared}
 										bind:this={messageInput}
 										{history}
@@ -5352,7 +5117,6 @@
 										{terminalContext}
 										{typingUsers}
 										on:typing={(event) => emitTyping(event.detail)}
-										callActive={!!(bridge?.connected || bridge?.connecting)}
 										callEnabled={!isShared}
 										bind:this={messageInput}
 										{history}
@@ -5416,7 +5180,6 @@
 							<div class="flex items-center h-full">
 								<Placeholder
 									{terminalContext}
-									callActive={!!(bridge?.connected || bridge?.connecting)}
 									callEnabled={!isShared}
 									bind:selectedModelIdx
 									{history}
@@ -5490,7 +5253,6 @@
 						submitPrompt={submitHandler}
 						onAskFile={askFile}
 						{stopResponse}
-						{bridge}
 						bind:callMode
 						{showMessage}
 						{eventTarget}

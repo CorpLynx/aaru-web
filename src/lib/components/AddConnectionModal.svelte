@@ -40,7 +40,6 @@
 	let provider = '';
 	let prefixId = '';
 	let enable = true;
-	let apiVersion = '';
 	let apiType = ''; // '' = chat completions (default), 'responses' = Responses API
 
 	let headers = '';
@@ -133,8 +132,6 @@
 					auth_type,
 					...(!direct && !ollama ? { forward_cookies: forwardCookies } : {}),
 					...(provider ? { provider } : {}),
-					...(azure ? { azure: true } : {}),
-					api_version: apiVersion,
 					passthrough_params: parsePassthroughParams(passthroughParams),
 					...(_headers ? { headers: _headers } : {})
 				}
@@ -145,7 +142,7 @@
 		});
 
 		const models = Array.isArray(res) ? res : res?.data;
-		if (show && !azure && Array.isArray(models)) {
+		if (show && Array.isArray(models)) {
 			availableModelIds = [
 				...new Set<string>(
 					models.map((model) => model?.id).filter((id) => typeof id === 'string' && id.trim())
@@ -191,30 +188,6 @@
 			return;
 		}
 
-		if (azure) {
-			if (!apiVersion) {
-				loading = false;
-				showAdvanced = true;
-
-				toast.error($i18n.t('API Version is required'));
-				return;
-			}
-
-			if (!key && !['azure_ad', 'microsoft_entra_id'].includes(auth_type)) {
-				loading = false;
-
-				toast.error($i18n.t('Key is required'));
-				return;
-			}
-
-			if (modelIds.length === 0) {
-				loading = false;
-				showAdvanced = true;
-				toast.error($i18n.t('Deployment names are required for Azure OpenAI'));
-				return;
-			}
-		}
-
 		if (headers) {
 			try {
 				const _headers = JSON.parse(headers);
@@ -246,8 +219,6 @@
 				headers: headers ? JSON.parse(headers) : undefined,
 				passthrough_params: parsePassthroughParams(passthroughParams),
 				...(provider ? { provider } : {}),
-				...(!ollama && azure ? { azure: true } : {}),
-				...(azure ? { api_version: apiVersion } : {}),
 				...(apiType ? { api_type: apiType } : {})
 			}
 		};
@@ -270,7 +241,6 @@
 		enable = true;
 		connectionType = 'external';
 		provider = '';
-		apiVersion = '';
 		apiType = '';
 	};
 
@@ -298,8 +268,7 @@
 				connectionType = connection.config?.connection_type ?? 'local';
 			} else {
 				connectionType = connection.config?.connection_type ?? 'external';
-				provider = connection.config?.provider ?? (connection.config?.azure ? 'azure' : '');
-				apiVersion = connection.config?.api_version ?? '';
+				provider = connection.config?.provider ?? '';
 				apiType = connection.config?.api_type ?? '';
 			}
 		}
@@ -308,13 +277,6 @@
 	$: if (show) {
 		init();
 	}
-
-	$: azure =
-		provider === 'azure' ||
-		((url.includes('azure.') || url.includes('cognitive.microsoft.com')) &&
-			!direct &&
-			provider === '' &&
-			!/\/openai\/v1(\/|$)/.test(url));
 
 	onMount(() => {
 		init();
@@ -398,13 +360,8 @@
 
 									{#if !ollama}
 										<datalist id="suggestions">
-											<option value="https://api.openai.com/v1" />
-											<option value="https://api.anthropic.com/v1" />
-											<option value="https://generativelanguage.googleapis.com/v1beta/openai" />
-											<option value="https://api.mistral.ai/v1" />
-											<option value="https://api.groq.com/openai/v1" />
-											<option value="https://openrouter.ai/api/v1" />
-											<option value="https://api.x.ai/v1" />
+											<!-- AARU: Aaru's own gateway; no cloud providers -->
+											<option value="http://litellm:4000/v1" />
 										</datalist>
 									{/if}
 								</div>
@@ -465,7 +422,6 @@
 												<option value="session">{$i18n.t('Session')}</option>
 												{#if !direct}
 													<option value="system_oauth">{$i18n.t('OAuth')}</option>
-													<option value="microsoft_entra_id">{$i18n.t('Entra ID')}</option>
 												{/if}
 											{/if}
 										</select>
@@ -489,10 +445,6 @@
 										{:else if auth_type === 'system_oauth'}
 											<div class={`text-xs self-center translate-y-[1px] text-gray-500`}>
 												{$i18n.t('Forwards system user OAuth access token to authenticate')}
-											</div>
-										{:else if ['azure_ad', 'microsoft_entra_id'].includes(auth_type)}
-											<div class={`text-xs self-center translate-y-[1px] text-gray-500`}>
-												{$i18n.t('Uses DefaultAzureCredential to authenticate')}
 											</div>
 										{/if}
 									</div>
@@ -667,35 +619,10 @@
 											class="text-xs text-gray-700 dark:text-gray-300 bg-transparent pr-5 outline-hidden"
 										>
 											<option value="">{$i18n.t('Default')}</option>
-											<option value="azure">{$i18n.t('Azure OpenAI')}</option>
 											<option value="llama.cpp">{$i18n.t('llama.cpp')}</option>
 											<option value="lmstudio">{$i18n.t('LM Studio')}</option>
 											<option value="litellm">{$i18n.t('LiteLLM')}</option>
 										</select>
-									</div>
-								</div>
-							{/if}
-
-							{#if azure}
-								<div class="flex gap-2 mt-2">
-									<div class="flex flex-col w-full">
-										<label
-											for="api-version-input"
-											class={`mb-0.5 text-xs text-gray-500
-										`}>{$i18n.t('API Version')}</label
-										>
-
-										<div class="flex-1">
-											<input
-												id="api-version-input"
-												class={`w-full text-sm ${inputClass}`}
-												type="text"
-												bind:value={apiVersion}
-												placeholder={$i18n.t('API Version')}
-												autocomplete="off"
-												required
-											/>
-										</div>
 									</div>
 								</div>
 							{/if}
@@ -745,11 +672,6 @@
 													url: url
 												}
 											)}
-										{:else if azure}
-											{$i18n.t('Deployment names are required for Azure OpenAI')}
-											<!-- {$i18n.t('Leave empty to include all models from "{{url}}" endpoint', {
-											url: `${url}/openai/deployments`
-										})} -->
 										{:else}
 											{$i18n.t('Leave empty to include all models from "{{url}}/models" endpoint', {
 												url: url

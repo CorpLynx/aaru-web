@@ -320,7 +320,7 @@ class Filter:
 # making it versatile for various use cases outside of just OpenAI models.
 class Pipe:
     class Valves(BaseModel):
-        OPENAI_API_BASE_URL: str = "https://api.openai.com/v1"
+        OPENAI_API_BASE_URL: str = "http://litellm:4000/v1"
         OPENAI_API_KEY: str = "your-key"
         pass
 
