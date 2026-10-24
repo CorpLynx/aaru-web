@@ -25,7 +25,8 @@ ARG UID=0
 ARG GID=0
 
 ######## WebUI frontend ########
-FROM --platform=$BUILDPLATFORM node:22-alpine3.20 AS build
+# AARU: base images pinned by digest; Dependabot (docker ecosystem) bumps them.
+FROM --platform=$BUILDPLATFORM node:22-alpine3.20@sha256:2289fb1fba0f4633b08ec47b94a89c7e20b829fc5679f9b7b298eaa2f1ed8b7e AS build
 ARG BUILD_HASH
 ARG BUILD_CHANNEL
 ARG USE_SLIM
@@ -56,7 +57,8 @@ RUN chown -R $UID:$GID /app/backend && \
     chmod -R g=u /app/backend/open_webui/static
 
 ######## WebUI backend ########
-FROM python:3.11-slim-bookworm AS base
+# AARU: pinned by digest (see above).
+FROM python:3.11-slim-bookworm@sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf AS base
 
 # Use args
 ARG USE_CUDA

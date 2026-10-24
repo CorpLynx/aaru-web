@@ -48,6 +48,11 @@ Replaced assets (same filenames): favicons, apple-touch icon, PWA icons, `logo.p
 Repository changes: upstream's release, PyPI, Docker and issue-label workflows and its funding link
 are removed; Dependabot targets `main`; `README.md` describes Aaru and credits Open WebUI.
 
+Supply chain: workflow actions are pinned to commit SHAs (version in a trailing comment, which
+Dependabot keeps updated), the `Dockerfile` base images and the Trivy scanner image are pinned by
+digest (Dependabot's docker ecosystem bumps the base images), and the CI formatter by exact version. Upstream's `regression.yaml` is removed: it ran `open-webui/tests` from that repository's
+`main` branch on upstream release PRs.
+
 Edited upstream files:
 
 - `src/tailwind.css`: imports the theme layer.
