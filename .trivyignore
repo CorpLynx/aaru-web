@@ -1,0 +1,10 @@
+# Accepted Trivy findings for the Aaru image. Each entry needs a reason and an
+# expiry date; Trivy reports the finding again once the date passes.
+
+# filelock: arbitrary file overwrite via insecure database file reopening.
+# Fixed only in filelock 4.2.1, but every unstructured release (0.24.0 through
+# 0.27.34) requires filelock<4, so the fix cannot be installed while RAG
+# document parsing ships. Exploiting it needs local write access to the lock
+# directory; the container runs read-only with no other local users.
+# Revisit when unstructured allows filelock 4, or drop unstructured.
+CVE-2026-112940 exp:2027-01-31
