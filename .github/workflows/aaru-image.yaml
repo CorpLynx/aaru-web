@@ -14,7 +14,9 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  TRIVY_VERSION: 0.65.0
+  # Trivy 0.65.0, pinned by digest. Trivy's own release images and Actions were
+  # compromised in March 2026 (0.69.4 to 0.69.6); never use a floating tag.
+  TRIVY_IMAGE: aquasec/trivy:0.65.0@sha256:a22415a38938a56c379387a8163fcb0ce38b10ace73e593475d3658d578b2436
 
 jobs:
   build:
@@ -32,10 +34,10 @@ jobs:
         run: rm -rf /opt/hostedtoolcache
 
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       # Same heap fix as upstream docker.yaml, without editing the Dockerfile.
       - name: Prepare CI Dockerfile
@@ -50,7 +52,7 @@ jobs:
           ' Dockerfile > "${RUNNER_TEMP}/Dockerfile"
 
       - name: Build image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: .
           file: ${{ runner.temp }}/Dockerfile
@@ -74,7 +76,7 @@ jobs:
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v "${PWD}/.trivyignore:/.trivyignore:ro" \
-            "aquasec/trivy:${TRIVY_VERSION}" image \
+            "${TRIVY_IMAGE}" image \
             --scanners vuln \
             --severity CRITICAL,HIGH \
             --ignore-unfixed \
@@ -84,7 +86,7 @@ jobs:
             "${LOCAL_IMAGE}"
 
       - name: Log in to the Container registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -108,7 +110,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload image reference
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: aaru-image
           path: ${{ runner.temp }}/aaru-image/image-ref.txt
