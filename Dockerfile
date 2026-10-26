@@ -183,6 +183,8 @@ RUN --mount=from=ghcr.io/astral-sh/uv:0.12.10,source=/uv,target=/bin/uv \
     python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
     fi; \
     fi; \
+    # AARU: the base image's setuptools vendors wheel 0.45.1 and jaraco.context 5.3.0 (CVE-2026-24049, CVE-2026-23949).
+    uv pip install --system --no-cache-dir 'setuptools==84.0.0'; \
     mkdir -p /app/backend/data; chown -R $UID:$GID /app/backend/data/; \
     if [ -d /app/backend/data/cache ]; then chmod -R a+rX /app/backend/data/cache; fi; \
     rm -rf /var/lib/apt/lists/*;
