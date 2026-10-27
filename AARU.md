@@ -83,6 +83,19 @@ Removed provider-specific code; OpenAI-compatible endpoints and local engines re
 Not changed: web search providers (search services, not models), Azure Blob and GCS storage, the
 ChatGPT history importer, and database migrations.
 
+### Errors and disclaimers
+
+Edited upstream files:
+
+- `src/routes/+error.svelte`: branded error page with a plain explanation per status (404, 401/403,
+  5xx) and links home and to the legal pages. Internal error messages are never shown.
+- `src/lib/components/chat/Chat.svelte`: shows the AI-output disclaimer under the composer (upstream
+  comments it out), with links to the Terms and Privacy Notice.
+
+The legal pages themselves (`/legal/*.html`, `/.well-known/security.txt`) are rendered and mounted by
+the deployment (`CorpLynx/aaru`: `legal/`, `infra/scripts/render-legal.sh`), so they can change
+without an image rebuild.
+
 ### Changelog
 
 `CHANGELOG.md`, which feeds the "What's new" dialog, now records Aaru's changes. Open WebUI's

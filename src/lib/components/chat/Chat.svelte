@@ -5083,7 +5083,15 @@
 									<div
 										class="absolute bottom-1 text-xs text-gray-500 text-center line-clamp-1 right-0 left-0"
 									>
-										<!-- {$i18n.t('LLMs can make mistakes. Verify important information.')} -->
+										<!-- AARU: the AI-output disclaimer is shown (upstream comments it out), with the legal pages. -->
+										{$i18n.t('Aaru can make mistakes. Check important information.')}
+										<a href="/legal/terms.html" target="_blank" rel="noopener" class="underline"
+											>{$i18n.t('Terms')}</a
+										>
+										·
+										<a href="/legal/privacy.html" target="_blank" rel="noopener" class="underline"
+											>{$i18n.t('Privacy')}</a
+										>
 									</div>
 								</div>
 							{/if}
