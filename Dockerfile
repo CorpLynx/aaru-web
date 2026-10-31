@@ -58,7 +58,7 @@ RUN chown -R $UID:$GID /app/backend && \
 
 ######## WebUI backend ########
 # AARU: pinned by digest (see above).
-FROM python:3.11-slim-bookworm@sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf AS base
+FROM python:3.15-slim-bookworm@sha256:4e03260adeeebafccd084f3584e6b84823aba5651cfb53ef8a078ed441ddf9cd AS base
 
 # Use args
 ARG USE_CUDA
