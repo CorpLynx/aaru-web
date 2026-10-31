@@ -1,0 +1,17 @@
+# Accepted gitleaks findings, all in history inherited from Open WebUI, none
+# Aaru credentials. Each line is one finding's fingerprint (commit:file:rule:line),
+# so only that exact occurrence is exempt; anything new still fails.
+#
+# - test_provider.py: Azure Storage's public Azurite emulator key.
+# - serpstack.json: a search-API key in upstream test data (2024), already
+#   public in open-webui/open-webui's history; not Aaru's to rotate.
+# - xterm-*.js(.map): minified identifiers, not secrets.
+# - Cargo.lock: a crate name and checksum.
+2f4f4c23764b03230cd626e3ba47b4ba93067450:backend/open_webui/test/apps/webui/storage/test_provider.py:generic-api-key:294
+501ff7a98bb874007ea1645d9fa371f75ae81f1a:backend/apps/rag/search/testdata/serpstack.json:generic-api-key:26
+58a13aec7e14637a9d50d781e3f24c7f0747c292:static/pyscript/xterm-DqawCVsv.js:generic-api-key:1
+58a13aec7e14637a9d50d781e3f24c7f0747c292:static/pyscript/xterm-DqawCVsv.js.map:generic-api-key:1
+7dc91de86c41866f4170602f074c39dbf1609377:crypto/encryption/Cargo.lock:generic-api-key:969
+8b3e370a6eec353c931af76739bae2506238d726:backend/apps/rag/search/testdata/serpstack.json:generic-api-key:26
+# The Cargo.lock entry as it appears in the current tree (directory scans omit the commit).
+crypto/encryption/Cargo.lock:generic-api-key:969
