@@ -1,7 +1,7 @@
 # aaru-web
 
 The web chat app for [Aaru](https://github.com/CorpLynx/aaru), a self-hosted, invite-only AI
-inference platform running open-weight models on a Framework Desktop. It installs on phones as a PWA.
+inference platform running open-weight models on its own hardware. It installs on phones as a PWA.
 
 > [!NOTE]
 > **Based on [Open WebUI](https://github.com/open-webui/open-webui).** This codebase started from
