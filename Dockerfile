@@ -144,7 +144,9 @@ RUN if [ "$USE_SLIM" = "true" ] && { [ "$USE_CUDA" = "true" ] || [ "$USE_OLLAMA"
 
 # Keep the slim runtime free of local document/audio processing tools.
 # Git-based tool requirements require the standard image.
+# AARU: apply Debian security updates published after the base image (e.g. apt, CVE-2026-109518).
 RUN apt-get update && \
+    apt-get -y upgrade --no-install-recommends && \
     apt-get install -y --no-install-recommends \
     curl jq ca-certificates \
     && if [ "$USE_SLIM" != "true" ]; then \
@@ -166,15 +168,17 @@ RUN --mount=from=ghcr.io/astral-sh/uv:0.12.10,source=/uv,target=/bin/uv \
     uv pip install --system -r requirements-slim.txt --no-cache-dir; \
     elif [ "$USE_CUDA" = "true" ]; then \
     # If you use CUDA the whisper and embedding model will be downloaded on first use
-    # fix: pin torch<=2.9.1 - torch 2.10.0 aarch64 wheels cause SIGILL on ARM devices (RPi 4 Cortex-A72) #21349
-    pip3 install 'torch<=2.9.1' torchvision torchaudio --index-url https://download.pytorch.org/whl/$USE_CUDA_DOCKER_VER --no-cache-dir; \
+    # AARU: torch 2.10.0 fixes CVE-2026-24747 (code execution via untrusted checkpoints). Upstream caps
+    # torch<=2.9.1 because 2.10.0's aarch64 wheels SIGILL on old ARM cores (#21349); Aaru builds amd64 only.
+    pip3 install 'torch==2.10.0' 'torchvision==0.25.0' 'torchaudio==2.10.0' --index-url https://download.pytorch.org/whl/$USE_CUDA_DOCKER_VER --no-cache-dir; \
     uv pip install --system -r requirements.txt --no-cache-dir; \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')"; \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ.get('AUXILIARY_EMBEDDING_MODEL', 'TaylorAI/bge-micro-v2'), device='cpu')"; \
     python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root=os.environ['WHISPER_MODEL_DIR'])"; \
     python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
     else \
-    pip3 install 'torch<=2.9.1' torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir; \
+    # AARU: torch 2.10.0 for CVE-2026-24747; see the CUDA branch above.
+    pip3 install 'torch==2.10.0' 'torchvision==0.25.0' 'torchaudio==2.10.0' --index-url https://download.pytorch.org/whl/cpu --no-cache-dir; \
     uv pip install --system -r requirements.txt --no-cache-dir; \
     if [ "$USE_SLIM" != "true" ]; then \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')"; \
