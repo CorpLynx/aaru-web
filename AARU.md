@@ -107,7 +107,10 @@ New files:
   moon; reed stems surface, topple flat with a ripple and drift together into the word AARU. The
   reeds' positions are updated on the CPU each frame and uploaded as a small float texture. The
   render scale adapts between 0.5 and 1.0 to hold the frame rate, and the loop skips frames while the
-  tab is hidden.
+  tab is hidden. Beyond the design reference: tapered stems shaded from green base to straw tip with
+  contact shadows where they cross, curved approach paths with a settle and a ripple ring on docking,
+  stems that ride the visible swell, faint reflected stars, and ripples under the pointer (off with
+  `prefers-reduced-motion`).
 - `src/lib/aaru/ReedsScene.svelte`: mounts the scene on a full-bleed canvas and releases the GL
   context on destroy. Without WebGL2 the page keeps its flat `#030507` background; with
   `prefers-reduced-motion` the word starts already formed.

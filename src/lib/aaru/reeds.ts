@@ -54,6 +54,7 @@ uniform float uTime;
 uniform float uCam;
 uniform int uN;
 uniform sampler2D uData;
+uniform vec4 uTouch[8];   // xz, birth time, strength
 out vec4 fragColor;
 
 const vec3 L = vec3(-0.500, 0.740, -0.450);
@@ -95,7 +96,7 @@ float bubbleAge(float age, float seed, float fk){
 }
 
 // A: centre.xz, angle, projected half-length   B: tip depth (neg = above), age since tip broke surface, glide speed, seed
-// C: tan(pitch), age since it fell flat (-1 = not yet), true half-length
+// C: tan(pitch), age since it fell flat (-1 = not yet), true half-length, age since it docked into its letter (-1 = not yet)
 float reedRip(vec2 q, vec2 dir, vec4 A, vec4 B, vec4 C, float rad){
   float h = 0.0;
   float d = segDist(q, dir, A.w);
@@ -115,6 +116,11 @@ float reedRip(vec2 q, vec2 dir, vec4 A, vec4 B, vec4 C, float rad){
     h -= 0.006*exp(-la*6.0)*exp(-d*30.0);
   }
   if (B.z > 0.001) h += min(B.z, 0.3)*0.03*sin(d*55.0 - uTime*9.0)*exp(-d*9.0);
+  // a soft ring as the stem nudges into its place in the word
+  if (C.w >= 0.0 && C.w < 3.0){
+    float x = d - C.w*0.22;
+    h += 0.0045*sin(x*70.0)*exp(-x*x*400.0)*exp(-C.w*1.3);
+  }
   for (int k = 0; k < 3; k++){
     float fk = float(k);
     float ba = bubbleAge(age, B.w, fk);
@@ -124,6 +130,33 @@ float reedRip(vec2 q, vec2 dir, vec4 A, vec4 B, vec4 C, float rad){
     }
   }
   return h;
+}
+
+// rings left by the pointer
+float touchRip(vec2 p){
+  float h = 0.0;
+  for (int k = 0; k < 8; k++){
+    vec4 T = uTouch[k];
+    float age = uTime - T.z;
+    if (T.w <= 0.0 || age < 0.0 || age > 3.5) continue;
+    float x = length(p - T.xy) - age*0.26;
+    h += T.w*0.006*sin(x*60.0)*exp(-x*x*260.0)*exp(-age*1.4);
+  }
+  return h;
+}
+
+// a sparse field of stars, seen only by reflection
+vec3 stars(vec3 r){
+  vec2 s = r.xz/max(r.y, 0.2)*26.0;
+  vec2 c = floor(s);
+  float hs = hash(vec3(c, 7.0));
+  if (hs < 0.88) return vec3(0.0);
+  vec2 o = (vec2(hash(vec3(c, 1.0)), hash(vec3(c, 2.0))) - 0.5)*0.7;
+  float d = length(fract(s) - 0.5 - o);
+  float mag = pow((hs - 0.88)/0.12, 3.0);
+  float tw = 0.7 + 0.3*sin(uTime*(0.8 + hs*2.5) + hs*40.0);
+  vec3 tint = mix(vec3(0.72, 0.84, 1.0), vec3(1.0, 0.9, 0.78), hash(vec3(c, 3.0)));
+  return tint*mag*tw*smoothstep(0.07, 0.0, d);
 }
 
 vec3 moonRad(vec3 r){
@@ -145,6 +178,9 @@ void main(){
   float h0 = baseWaves(p, t);
   float hx = baseWaves(p + vec2(e, 0.0), t);
   float hz = baseWaves(p + vec2(0.0, e), t);
+  h0 += touchRip(p);
+  hx += touchRip(p + vec2(e, 0.0));
+  hz += touchRip(p + vec2(0.0, e));
   vec3 nb = normalize(vec3(h0 - hx, e, h0 - hz));
 
   float bestTop = -1e3; float bCov = 0.0;
@@ -158,7 +194,8 @@ void main(){
     vec2 dc = p - A.xy;
     float r1 = (B.y > -1.0 && B.y < 4.0) ? max(B.y, 0.0)*0.25 + 0.1 : 0.0;
     float r2 = (C.y >= 0.0 && C.y < 4.0) ? C.y*0.3 + 0.1 : 0.0;
-    float cullR = A.w + 0.14 + max(r1, r2) + B.z*2.0;
+    float r3 = (C.w >= 0.0 && C.w < 3.0) ? C.w*0.22 + 0.1 : 0.0;
+    float cullR = A.w + 0.14 + max(max(r1, r2), r3) + B.z*2.0;
     if (dot(dc, dc) > cullR*cullR) continue;
     vec2 dir = vec2(cos(A.z), sin(A.z));
     vec2 perp = vec2(-dir.y, dir.x);
@@ -194,7 +231,8 @@ void main(){
         float ac = dot(dq, perp);
         if (abs(al) < A.w){
           float tipT = smoothstep(A.w, A.w - 0.05, abs(al));
-          float rad = R*(0.5 + 0.5*tipT);
+          // rounded ends, and a taper from the thick base to the tip
+          float rad = R*(0.5 + 0.5*tipT)*(1.0 - 0.3*(al/A.w*0.5 + 0.5));
           float cov = smoothstep(rad + px*0.5, rad - px*0.5, abs(ac))*smoothstep(A.w, A.w - px, abs(al));
           if (cov > 0.0){
             float top = y + B.w*0.004 + sqrt(max(rad*rad - ac*ac, 0.0));
@@ -212,6 +250,8 @@ void main(){
   vec3 n = normalize(vec3(h0 - hx, e, h0 - hz));
   float fres = 0.02 + 0.98*pow(1.0 - max(dot(n, -rd), 0.0), 5.0);
   vec3 col = moonRad(reflect(rd, n))*fres;
+  // stars use a calmer normal so they wobble on the swell instead of breaking into noise
+  col += stars(reflect(rd, normalize(vec3(n.x*0.12, 1.0, n.z*0.12))))*0.42;
 
   if (bCov > 0.0){
     vec2 dir = vec2(cos(bAng), sin(bAng));
@@ -230,12 +270,33 @@ void main(){
     alb *= 1.0 - 0.45*node;
     float endc = smoothstep(bHl - 0.012, bHl, abs(u));
     alb *= 1.0 - 0.5*endc;
+    // green at the base, dried straw toward the tip
+    alb = mix(alb, alb*vec3(1.35, 1.15, 0.72), smoothstep(-bHl, bHl, u)*0.55);
     float wf = exp(-max(bAge, 0.0)/6.0);
+    alb *= 1.0 - 0.3*wf;   // darker while still wet
     float dif = max(dot(nr, L), 0.0);
-    vec3 rc = alb*(MOON*dif*1.15 + vec3(0.003, 0.004, 0.006));
+
+    // Stems lying on top of this one: a moon shadow cast across it, and a dark crease where they touch.
+    float occ = 0.0;
+    vec2 ls = normalize(L.xz)*0.02;
+    for (int j = 0; j < 128; j++){
+      if (j >= uN) break;
+      vec4 B2 = texelFetch(uData, ivec2(j, 1), 0);
+      if (B2.w <= bSeed + 1e-4 || B2.y < 0.0) continue;
+      vec4 A2 = texelFetch(uData, ivec2(j, 0), 0);
+      vec2 dc2 = p - A2.xy;
+      float cr = A2.w + 0.08;
+      if (dot(dc2, dc2) > cr*cr) continue;
+      vec2 d2 = vec2(cos(A2.z), sin(A2.z));
+      float R2 = 0.02*(0.85 + 0.3*fract(B2.w*13.7));
+      occ = max(occ, 0.75*smoothstep(R2*1.6, R2*0.5, segDist(dc2 + ls, d2, A2.w)));
+      occ = max(occ, 0.35*smoothstep(R2*2.4, R2, segDist(dc2, d2, A2.w)));
+    }
+    float lit = 1.0 - occ;
+    vec3 rc = alb*(MOON*dif*1.15*lit + vec3(0.003, 0.004, 0.006));
     vec3 rr = reflect(rd, nr);
     float sd = max(dot(rr, L), 0.0);
-    rc += MOON*(pow(sd, 90.0)*0.18 + pow(sd, 700.0)*1.6*(1.0 + wf))*(1.0 - 0.6*node);
+    rc += MOON*(pow(sd, 90.0)*0.18 + pow(sd, 700.0)*1.6*(1.0 + wf))*(1.0 - 0.6*node)*lit;
     // beads of water on a freshly surfaced stem
     float bead = smoothstep(0.8, 0.9, noise(vec3(u*70.0, s*5.0, bSeed*40.0)))*wf;
     rc += MOON*bead*0.12*(0.3 + pow(sd, 20.0));
@@ -361,6 +422,9 @@ function buildReeds(): Reed[] {
 	return reeds;
 }
 
+/** Height of the top-down camera above the water: pulls back on narrow screens so the word fits. */
+const camHeight = (aspect: number) => Math.max(4.2, 6.5 / aspect);
+
 const smooth = (x: number) => {
 	x = Math.min(1, Math.max(0, x));
 	return x * x * x * (x * (x * 6 - 15) + 10);
@@ -415,6 +479,7 @@ export function startReeds(canvas: HTMLCanvasElement, opts: ReedsOptions = {}): 
 	const uRes = gl.getUniformLocation(prog, 'uRes');
 	const uTime = gl.getUniformLocation(prog, 'uTime');
 	const uCam = gl.getUniformLocation(prog, 'uCam');
+	const uTouch = gl.getUniformLocation(prog, 'uTouch');
 
 	const reeds = buildReeds();
 	const N = reeds.length;
@@ -451,6 +516,37 @@ export function startReeds(canvas: HTMLCanvasElement, opts: ReedsOptions = {}): 
 	ro.observe(canvas);
 
 	let t0 = performance.now();
+
+	// The pointer leaves rings on the water. Screen position maps to the water
+	// plane the same way the shader's top-down camera does.
+	const touches = new Float32Array(8 * 4);
+	let touchIdx = 0;
+	let lastTX = 1e9;
+	let lastTZ = 1e9;
+	const addTouch = (ev: PointerEvent, press: boolean) => {
+		const rect = canvas.getBoundingClientRect();
+		if (!rect.width || !rect.height) return;
+		const ux = (ev.clientX - rect.left - rect.width / 2) / rect.height;
+		const uy = (rect.height / 2 - (ev.clientY - rect.top)) / rect.height - 0.2;
+		const k = camHeight(rect.width / rect.height) / 1.6;
+		const wx = ux * k;
+		const wz = -uy * k;
+		const dist = Math.sqrt((wx - lastTX) ** 2 + (wz - lastTZ) ** 2);
+		if (!press && dist < 0.09) return;
+		lastTX = wx;
+		lastTZ = wz;
+		touches.set(
+			[wx, wz, (performance.now() - t0) / 1000 + skip, press ? 1 : Math.min(0.8, 0.3 + dist * 2)],
+			touchIdx * 4
+		);
+		touchIdx = (touchIdx + 1) % 8;
+	};
+	const onMove = (ev: PointerEvent) => addTouch(ev, false);
+	const onDown = (ev: PointerEvent) => addTouch(ev, true);
+	if (!opts.reduceMotion) {
+		window.addEventListener('pointermove', onMove, { passive: true });
+		window.addEventListener('pointerdown', onDown, { passive: true });
+	}
 	let last = t0;
 	let acc = 0;
 	let frames = 0;
@@ -518,18 +614,29 @@ export function startReeds(canvas: HTMLCanvasElement, opts: ReedsOptions = {}): 
 			let x = fx;
 			let z = fz;
 			let a = fa;
+			let dockAge = -1;
 			if (!r.stray) {
 				const tA = Math.max(ts + Tf + 1.2, 0.3 * D + r.r2 * 0.4 * D + r.letter * 0.04 * D);
 				const g = Math.max(2.5, 0.18 * D * (0.8 + 0.4 * r.r3));
-				const s = smooth((t - tA) / g);
+				const u = (t - tA) / g;
+				const s = smooth(u);
 				if (s > 0) {
-					x = fx + (r.tx - fx) * s;
-					z = fz + (r.tz - fz) * s;
-					a = fa + wrapPi(r.ta - fa) * s;
-					if (s >= 1) {
-						x = r.tx - Math.sin(r.ta) * 0.003 * Math.sin(t * 0.7 + r.seed * 10);
-						z = r.tz + Math.cos(r.ta) * 0.003 * Math.sin(t * 0.7 + r.seed * 10);
-						a = r.ta + 0.006 * Math.sin(t * 0.5 + r.seed * 7);
+					const ddx = r.tx - fx;
+					const ddz = r.tz - fz;
+					if (u < 1) {
+						// glide in on a shallow arc; the turn starts late and finishes with the glide
+						const arc = Math.sin(Math.PI * s) * (r.r3 - 0.5) * 0.3;
+						x = fx + ddx * s - ddz * arc;
+						z = fz + ddz * s + ddx * arc;
+						a = fa + wrapPi(r.ta - fa) * smooth(u * 1.25 - 0.25);
+					} else {
+						// docked: a small nudge along the way it came, then it settles
+						dockAge = t - (tA + g);
+						const dl = Math.sqrt(ddx * ddx + ddz * ddz) || 1;
+						const settle = 0.012 * Math.exp(-dockAge * 2.2) * Math.sin(dockAge * 7);
+						x = r.tx + (ddx / dl) * settle;
+						z = r.tz + (ddz / dl) * settle;
+						a = r.ta + 0.02 * Math.exp(-dockAge * 2) * Math.sin(dockAge * 6);
 					}
 				}
 			}
@@ -545,6 +652,20 @@ export function startReeds(canvas: HTMLCanvasElement, opts: ReedsOptions = {}): 
 			r.px = x;
 			r.pz = z;
 			r.pa = a;
+
+			// Floating stems ride the same swell the water shows (the three long waves in
+			// baseWaves), so neighbours move together and the finished word breathes.
+			if (ramp > 0) {
+				const p1 = (0.8 * x + 0.6 * z) * 2.1 + t * 0.9;
+				const p2 = (-0.6 * x + 0.8 * z) * 3.3 + t * 1.3;
+				const p3 = (0.3 * x - 0.95 * z) * 5.7 + t * 1.9;
+				const c1 = 0.014 * Math.cos(p1) * ramp;
+				const c2 = 0.0098 * Math.cos(p2) * ramp;
+				const c3 = 0.0056 * Math.cos(p3) * ramp;
+				x += 0.8 * c1 - 0.6 * c2 + 0.3 * c3;
+				z += 0.6 * c1 + 0.8 * c2 - 0.95 * c3;
+				a += (0.012 * Math.sin(p1 + 1.3) + 0.008 * Math.sin(p2 + 0.4)) * ramp;
+			}
 
 			// Projected shape of a tilted stem: the surfaced end stays put, the far end swings out as it falls.
 			const c = Math.cos(th);
@@ -564,14 +685,15 @@ export function startReeds(canvas: HTMLCanvasElement, opts: ReedsOptions = {}): 
 			data[o3] = Math.tan(th);
 			data[o3 + 1] = landAge;
 			data[o3 + 2] = r.hl;
-			data[o3 + 3] = 0;
+			data[o3 + 3] = dockAge;
 		}
 
 		gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N, 3, gl.RGBA, gl.FLOAT, data);
 		const aspect = canvas.width / Math.max(1, canvas.height);
 		gl.uniform2f(uRes, canvas.width, canvas.height);
 		gl.uniform1f(uTime, t);
-		gl.uniform1f(uCam, Math.max(4.2, 6.5 / aspect));
+		gl.uniform1f(uCam, camHeight(aspect));
+		gl.uniform4fv(uTouch, touches);
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
 	};
 	raf = requestAnimationFrame(loop);
@@ -579,6 +701,7 @@ export function startReeds(canvas: HTMLCanvasElement, opts: ReedsOptions = {}): 
 	return {
 		replay: () => {
 			t0 = performance.now();
+			touches.fill(0);
 			lastT = -1;
 			for (const r of reeds) r.px = r.pz = r.pa = undefined;
 		},
@@ -586,6 +709,8 @@ export function startReeds(canvas: HTMLCanvasElement, opts: ReedsOptions = {}): 
 			alive = false;
 			cancelAnimationFrame(raf);
 			ro.disconnect();
+			window.removeEventListener('pointermove', onMove);
+			window.removeEventListener('pointerdown', onDown);
 			gl.deleteTexture(tex);
 			gl.deleteBuffer(buf);
 			gl.deleteProgram(prog);
