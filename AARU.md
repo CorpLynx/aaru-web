@@ -96,6 +96,34 @@ The legal pages themselves (`/legal/*.html`, `/.well-known/security.txt`) are re
 the deployment (`CorpLynx/aaru`: `legal/`, `infra/scripts/render-legal.sh`), so they can change
 without an image rebuild.
 
+### Sign-in page
+
+Design source: `CorpLynx/aaru` → `design/login/index.html` ("Reeds gathering") and
+`design/specs/openwebui.md` (01 Login).
+
+New files:
+
+- `src/lib/aaru/reeds.ts`: the scene. One WebGL2 fragment shader draws black night water lit by the
+  moon; reed stems surface, topple flat with a ripple and drift together into the word AARU. The
+  reeds' positions are updated on the CPU each frame and uploaded as a small float texture. The
+  render scale adapts between 0.5 and 1.0 to hold the frame rate, and the loop skips frames while the
+  tab is hidden.
+- `src/lib/aaru/ReedsScene.svelte`: mounts the scene on a full-bleed canvas and releases the GL
+  context on destroy. Without WebGL2 the page keeps its flat `#030507` background; with
+  `prefers-reduced-motion` the word starts already formed.
+- `src/lib/aaru/auth.css`: the card under the word (Ink 900 at 72% with a 12px blur, 16px radius),
+  Ink 800 fields, the off-white primary button and secondary SSO buttons. Scoped to the page's
+  existing ids, so the stock markup barely changes.
+
+Edited upstream files:
+
+- `src/routes/auth/+page.svelte`: the scene in place of the flat background, the card placed under
+  the word, and a "Members only" overline with "Membership is by invitation." on the sign-in form.
+  Sign-in, sign-up, LDAP, SSO, MFA and pending-approval flows are unchanged.
+
+The separate encryption passphrase from the login spec is not on the form yet: nothing in the app
+derives a key from it, so the field would claim protection that does not exist.
+
 ### Changelog
 
 `CHANGELOG.md`, which feeds the "What's new" dialog, now records Aaru's changes. Open WebUI's

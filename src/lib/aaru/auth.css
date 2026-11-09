@@ -1,0 +1,203 @@
+/*
+  AARU: sign-in page over the "Reeds gathering" scene.
+
+  Design source: CorpLynx/aaru design/login/index.html and
+  design/specs/openwebui.md (01 Login). Scoped to the ids the stock page
+  already has (#auth-page, #auth-container, #auth-login-card), so the
+  upstream markup barely changes. Unlayered, so it wins over Tailwind's
+  utility layer without !important.
+*/
+
+#auth-page {
+	--aaru-auth-bg: #030507;
+	background: var(--aaru-auth-bg);
+	color: var(--aaru-fg-1);
+	font-family: var(--aaru-font-sans);
+}
+
+/* The page scrolls when the card does not fit under the word. */
+#auth-container {
+	height: 100dvh;
+	overflow-y: auto;
+}
+
+/* The word fills the top half of the screen; the card sits under it. */
+#auth-page .aaru-auth-stack {
+	margin: max(54vh, 300px) auto 0;
+	padding-bottom: 32px;
+	justify-content: flex-start;
+	width: 100%;
+}
+
+#auth-login-card {
+	margin: 0 auto;
+	padding: 24px;
+	max-width: 380px;
+	text-align: left;
+	color: var(--aaru-fg-1);
+	background: rgba(10, 12, 15, 0.72); /* Ink 900 */
+	border: 1px solid var(--aaru-line-1);
+	border-radius: var(--aaru-radius-xl);
+	-webkit-backdrop-filter: blur(12px);
+	backdrop-filter: blur(12px);
+	box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+	animation: aaru-auth-in 1.6s var(--aaru-ease) 2.2s both;
+}
+
+@keyframes aaru-auth-in {
+	from {
+		opacity: 0;
+		transform: translateY(18px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	#auth-login-card {
+		animation: none;
+	}
+}
+
+#auth-login-card .aaru-auth-overline {
+	margin: 0 0 4px;
+	font: 500 11px/16px var(--aaru-font-mono);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--aaru-fg-3);
+}
+
+#auth-login-card .aaru-auth-title {
+	font-size: 24px;
+	line-height: 32px;
+	font-weight: 600;
+	letter-spacing: -0.015em;
+	color: var(--aaru-fg-1);
+}
+
+#auth-login-card .aaru-auth-lede {
+	margin: 4px 0 0;
+	font-size: 13px;
+	line-height: 20px;
+	color: var(--aaru-fg-2);
+}
+
+#auth-login-card label {
+	font-size: 13px;
+	line-height: 16px;
+	font-weight: 500;
+	color: var(--aaru-fg-2);
+	margin-bottom: 8px;
+	text-align: left;
+}
+
+/* Text fields: Ink 800, line-2 border, 8px radius. */
+#auth-login-card input[type='email'],
+#auth-login-card input[type='text']:not(#password):not(#confirm-password),
+#auth-login-card div.relative:has(> input#password),
+#auth-login-card div.relative:has(> input#confirm-password) {
+	height: 40px;
+	margin: 0;
+	padding: 0 12px;
+	background: var(--aaru-ink-800);
+	border: 1px solid var(--aaru-line-2);
+	border-radius: var(--aaru-radius-md);
+	color: var(--aaru-fg-1);
+	font-size: 15px;
+	line-height: 24px;
+	transition:
+		border-color var(--aaru-dur-fast) var(--aaru-ease),
+		box-shadow var(--aaru-dur-fast) var(--aaru-ease);
+}
+
+/* The password wrapper carries the field styling; its input stays bare. */
+#auth-login-card div.relative:has(> input#password) input,
+#auth-login-card div.relative:has(> input#confirm-password) input {
+	height: 100%;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	font-size: 15px;
+	color: var(--aaru-fg-1);
+}
+
+#auth-login-card div.relative:has(> input) {
+	align-items: center;
+	color: var(--aaru-fg-3);
+}
+
+#auth-login-card input::placeholder {
+	color: var(--aaru-fg-4);
+}
+
+#auth-login-card input[type='email']:hover,
+#auth-login-card input[type='text']:not(#password):not(#confirm-password):hover,
+#auth-login-card div.relative:has(> input):hover {
+	border-color: var(--aaru-line-3);
+}
+
+#auth-login-card input[type='email']:focus,
+#auth-login-card input[type='text']:not(#password):not(#confirm-password):focus,
+#auth-login-card div.relative:has(> input):focus-within {
+	border-color: var(--aaru-line-3);
+	box-shadow: var(--aaru-ring-focus);
+	outline: none;
+}
+
+/* Primary button: off-white, never an accent. */
+#auth-login-card form button[type='submit'] {
+	height: 40px;
+	padding: 0 16px;
+	align-items: center;
+	border: 1px solid transparent;
+	border-radius: var(--aaru-radius-md);
+	background: var(--aaru-fg-1);
+	color: var(--aaru-ink-950);
+	font-size: 14px;
+	line-height: 20px;
+	font-weight: 500;
+	transition:
+		background var(--aaru-dur-fast) var(--aaru-ease),
+		border-color var(--aaru-dur-fast) var(--aaru-ease);
+}
+
+#auth-login-card form button[type='submit']:hover {
+	background: #ffffff;
+	color: var(--aaru-ink-950);
+}
+
+#auth-login-card form button[type='submit']:active {
+	border-color: var(--aaru-line-3);
+}
+
+#auth-login-card form button[type='submit']:focus-visible {
+	outline: none;
+	box-shadow: 0 0 0 4px rgba(237, 239, 242, 0.12);
+}
+
+/* SSO and LDAP options: secondary buttons. */
+#auth-login-card > div.flex-col > button {
+	height: 40px;
+	padding: 0 16px;
+	border: 1px solid var(--aaru-line-2);
+	border-radius: var(--aaru-radius-md);
+	background: var(--aaru-ink-800);
+	color: var(--aaru-fg-1);
+	font-size: 14px;
+}
+
+#auth-login-card > div.flex-col > button:hover {
+	background: var(--aaru-ink-700);
+	border-color: var(--aaru-line-3);
+}
+
+#auth-login-card hr {
+	background: var(--aaru-line-1);
+}
+
+#auth-login-card a,
+#auth-login-card form button[type='button'].underline {
+	color: var(--aaru-signal);
+}

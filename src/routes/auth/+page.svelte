@@ -30,6 +30,9 @@
 	import OnBoarding from '$lib/components/OnBoarding.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import { redirect } from '@sveltejs/kit';
+	// AARU: sign-in page over the "Reeds gathering" scene.
+	import ReedsScene from '$lib/aaru/ReedsScene.svelte';
+	import '$lib/aaru/auth.css';
 
 	const i18n = getContext('i18n');
 
@@ -250,7 +253,8 @@
 />
 
 <div class="w-full h-screen max-h-[100dvh] text-white relative" id="auth-page">
-	<div class="w-full h-full absolute top-0 left-0 bg-white dark:bg-black"></div>
+	<!-- AARU: night water with reeds gathering into the word, in place of the flat background. -->
+	<ReedsScene />
 
 	<div class="w-full absolute top-0 left-0 right-0 h-8 drag-region" />
 
@@ -290,7 +294,8 @@
 						</div>
 					</div>
 				{:else}
-					<div class="my-auto flex flex-col justify-center items-center">
+					<!-- AARU: aaru-auth-stack puts the card under the word (auth.css). -->
+					<div class="my-auto flex flex-col justify-center items-center aaru-auth-stack">
 						<div id="auth-login-card" class=" sm:max-w-md my-auto pb-10 w-full dark:text-gray-100">
 							{#if $config?.metadata?.auth_logo_position === 'center'}
 								<div class="flex justify-center mb-6">
@@ -314,7 +319,11 @@
 								}}
 							>
 								<div class="mb-1">
-									<div class=" text-2xl font-normal">
+									<!-- AARU: overline and lede for the sign-in card. -->
+									{#if mode === 'signin' && !($config?.onboarding ?? false)}
+										<p class="aaru-auth-overline">{$i18n.t('Members only')}</p>
+									{/if}
+									<div class=" text-2xl font-normal aaru-auth-title">
 										{#if $config?.onboarding ?? false}
 											{$i18n.t(`Get started with {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
 										{:else if mode === 'ldap'}
@@ -325,6 +334,12 @@
 											{$i18n.t(`Sign up to {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
 										{/if}
 									</div>
+
+									{#if mode === 'signin' && !($config?.onboarding ?? false)}
+										<p class="aaru-auth-lede">
+											{$i18n.t('Membership is by invitation.')}
+										</p>
+									{/if}
 
 									{#if $config?.onboarding ?? false}
 										<div class="mt-1 text-xs font-normal text-gray-600 dark:text-gray-500">
