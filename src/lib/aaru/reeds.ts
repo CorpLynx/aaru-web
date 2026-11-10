@@ -42,8 +42,8 @@ type Reed = {
 	seed: number;
 	px?: number;
 	pz?: number;
-	pa?: number;
-	spd?: number;
+	svx?: number;
+	svz?: number;
 };
 
 const FRAG = `#version 300 es
@@ -97,36 +97,61 @@ float bubbleAge(float age, float seed, float fk){
 
 // A: centre.xz, angle, projected half-length   B: tip depth (neg = above), age since tip broke surface, glide speed, seed
 // C: tan(pitch), age since it fell flat (-1 = not yet), true half-length, age since it docked into its letter (-1 = not yet)
-float reedRip(vec2 q, vec2 dir, vec4 A, vec4 B, vec4 C, float rad){
+// D (row 3, passed as vel): smoothed glide velocity.xz
+// Every term below fades in and out smoothly and is ~0 at the cull radius used in main(),
+// so nothing pops or leaves a seam on the water.
+float reedRip(vec2 q, vec2 dir, vec4 A, vec4 B, vec4 C, vec2 vel, float rad){
   float h = 0.0;
   float d = segDist(q, dir, A.w);
   float dt = length(q - dir*A.w);
   float age = B.y, la = C.y;
-  bool isFlat = la >= 0.0;
-  if (age < 0.0 && B.x < 0.08) h += 0.010*(1.0 - max(B.x, 0.0)/0.08)*exp(-dt*30.0);
-  if (isFlat) h += 0.0025*exp(-max(d - rad, 0.0)/0.007);
-  else if (age >= 0.0) h += 0.0035*exp(-max(dt - rad, 0.0)/0.008);
-  if (age >= 0.0 && age < 4.0){
+
+  // the surface swells over the rising tip, then relaxes once it is through
+  float bump = age < 0.0 ? 1.0 - clamp(B.x/0.08, 0.0, 1.0) : exp(-age*9.0);
+  h += 0.010*bump*exp(-dt*30.0);
+
+  // meniscus: around the tip while the stem stands, along the whole stem once it lies flat
+  float flatT = smoothstep(0.0, 0.25, la);
+  h += 0.0035*smoothstep(0.0, 0.2, age)*(1.0 - flatT)*exp(-max(dt - rad, 0.0)/0.008);
+  h += 0.0025*flatT*exp(-max(d - rad, 0.0)/0.007);
+
+  // ring from the tip breaking the surface
+  if (age > 0.0 && age < 4.0){
     float x = dt - age*0.25;
-    h += 0.005*sin(x*75.0)*exp(-x*x*450.0)*exp(-age*0.9);
+    h += 0.005*sin(x*75.0)*exp(-x*x*450.0)*exp(-age*0.9)*smoothstep(0.0, 0.18, age)*smoothstep(4.0, 3.0, age);
   }
-  if (isFlat && la < 4.0){
+  // the slap as it falls flat: a ring off the whole stem and a brief trough under it
+  if (la > 0.0 && la < 4.0){
     float x = d - la*0.3;
-    h += 0.008*sin(x*65.0)*exp(-x*x*350.0)*exp(-la*0.9);
-    h -= 0.006*exp(-la*6.0)*exp(-d*30.0);
+    h += 0.008*sin(x*65.0)*exp(-x*x*350.0)*exp(-la*0.9)*smoothstep(0.0, 0.12, la)*smoothstep(4.0, 3.0, la);
+    h -= 0.006*smoothstep(0.0, 0.08, la)*exp(-la*6.0)*exp(-d*30.0);
   }
-  if (B.z > 0.001) h += min(B.z, 0.3)*0.03*sin(d*55.0 - uTime*9.0)*exp(-d*9.0);
-  // a soft ring as the stem nudges into its place in the word
-  if (C.w >= 0.0 && C.w < 3.0){
-    float x = d - C.w*0.22;
-    h += 0.0045*sin(x*70.0)*exp(-x*x*400.0)*exp(-C.w*1.3);
+
+  // Wake of a gliding stem, steady in the stem's own frame: a low bow wave pushed
+  // ahead of it and short ripples trailing behind.
+  float sp = length(vel);
+  if (sp > 0.002){
+    vec2 vh = vel/sp;
+    float s = min(sp, 0.6);
+    float al = dot(q, vh);
+    float ext = abs(dot(dir, vh))*A.w;   // how far the stem reaches along its heading
+    h += s*0.010*smoothstep(-0.03, 0.06, al - ext)*exp(-d*22.0);
+    float back = al + ext;
+    h += s*0.007*sin(back*46.0)*smoothstep(0.02, -0.08, back)*exp(back*3.0)*exp(-d*d*70.0);
   }
+
+  // a faint ring as the stem nudges into its place in the word
+  if (C.w > 0.0 && C.w < 3.0){
+    float x = d - 0.02 - C.w*0.2;
+    h += 0.0024*sin(x*52.0)*exp(-x*x*300.0)*smoothstep(0.0, 0.35, C.w)*smoothstep(3.0, 1.8, C.w);
+  }
+
   for (int k = 0; k < 3; k++){
     float fk = float(k);
     float ba = bubbleAge(age, B.w, fk);
     if (ba > 0.7 && ba < 2.2){
       float x = length(q - bubblePos(dir, A.w, B.w, fk)) - (ba - 0.7)*0.15;
-      h += 0.0015*sin(x*120.0)*exp(-x*x*3000.0)*exp(-(ba - 0.7)*2.0);
+      h += 0.0015*sin(x*120.0)*exp(-x*x*3000.0)*exp(-(ba - 0.7)*2.0)*smoothstep(0.7, 0.85, ba);
     }
   }
   return h;
@@ -164,6 +189,15 @@ vec3 moonRad(vec3 r){
   return MOON*(pow(d, 3000.0)*140.0 + pow(d, 400.0)*8.0 + pow(d, 60.0)*0.5);
 }
 
+// Moonlight on the water. Graded lobes so a ripple shades from black through
+// silver to white instead of flashing, and the sharpest lobe widens where the
+// surface turns faster than a pixel can resolve (w), which stops the sparkle crawling.
+vec3 moonWater(vec3 r, float w){
+  float d = max(dot(r, L), 0.0);
+  float sharp = mix(3000.0, 450.0, w);
+  return MOON*(pow(d, sharp)*140.0*(sharp/3000.0) + pow(d, 400.0)*8.0 + pow(d, 110.0)*1.6 + pow(d, 60.0)*0.5 + pow(d, 18.0)*0.12);
+}
+
 void main(){
   vec2 uv0 = (gl_FragCoord.xy - 0.5*uRes)/uRes.y;
   vec2 uv = uv0; uv.y -= 0.2;
@@ -191,18 +225,20 @@ void main(){
     vec4 A = texelFetch(uData, ivec2(i, 0), 0);
     vec4 B = texelFetch(uData, ivec2(i, 1), 0);
     vec4 C = texelFetch(uData, ivec2(i, 2), 0);
+    vec2 vel = texelFetch(uData, ivec2(i, 3), 0).xy;
     vec2 dc = p - A.xy;
     float r1 = (B.y > -1.0 && B.y < 4.0) ? max(B.y, 0.0)*0.25 + 0.1 : 0.0;
     float r2 = (C.y >= 0.0 && C.y < 4.0) ? C.y*0.3 + 0.1 : 0.0;
     float r3 = (C.w >= 0.0 && C.w < 3.0) ? C.w*0.22 + 0.1 : 0.0;
-    float cullR = A.w + 0.14 + max(max(r1, r2), r3) + B.z*2.0;
+    float rw = dot(vel, vel) > 4e-6 ? 0.3 : 0.0;
+    float cullR = A.w + 0.14 + max(max(r1, r2), max(r3, rw));
     if (dot(dc, dc) > cullR*cullR) continue;
     vec2 dir = vec2(cos(A.z), sin(A.z));
     vec2 perp = vec2(-dir.y, dir.x);
     float R = 0.02*(0.85 + 0.3*fract(B.w*13.7));
-    h0 += reedRip(dc, dir, A, B, C, R);
-    hx += reedRip(dc + vec2(e, 0.0), dir, A, B, C, R);
-    hz += reedRip(dc + vec2(0.0, e), dir, A, B, C, R);
+    h0 += reedRip(dc, dir, A, B, C, vel, R);
+    hx += reedRip(dc + vec2(e, 0.0), dir, A, B, C, vel, R);
+    hz += reedRip(dc + vec2(0.0, e), dir, A, B, C, vel, R);
 
     // air escaping the hollow stem just before it surfaces
     for (int k = 0; k < 3; k++){
@@ -249,7 +285,8 @@ void main(){
   // pure black water: only the moon, by reflection
   vec3 n = normalize(vec3(h0 - hx, e, h0 - hz));
   float fres = 0.02 + 0.98*pow(1.0 - max(dot(n, -rd), 0.0), 5.0);
-  vec3 col = moonRad(reflect(rd, n))*fres;
+  float nw = clamp(length(fwidth(n))*14.0, 0.0, 1.0);
+  vec3 col = moonWater(reflect(rd, n), nw)*fres;
   // stars use a calmer normal so they wobble on the swell instead of breaking into noise
   col += stars(reflect(rd, normalize(vec3(n.x*0.12, 1.0, n.z*0.12))))*0.42;
 
@@ -483,7 +520,7 @@ export function startReeds(canvas: HTMLCanvasElement, opts: ReedsOptions = {}): 
 
 	const reeds = buildReeds();
 	const N = reeds.length;
-	const data = new Float32Array(N * 3 * 4);
+	const data = new Float32Array(N * 4 * 4);
 	const tex = gl.createTexture();
 	gl.activeTexture(gl.TEXTURE0);
 	gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -491,7 +528,7 @@ export function startReeds(canvas: HTMLCanvasElement, opts: ReedsOptions = {}): 
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, N, 3, 0, gl.RGBA, gl.FLOAT, data);
+	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, N, 4, 0, gl.RGBA, gl.FLOAT, data);
 	gl.uniform1i(gl.getUniformLocation(prog, 'uData'), 0);
 	gl.uniform1i(gl.getUniformLocation(prog, 'uN'), N);
 
@@ -623,35 +660,44 @@ export function startReeds(canvas: HTMLCanvasElement, opts: ReedsOptions = {}): 
 				if (s > 0) {
 					const ddx = r.tx - fx;
 					const ddz = r.tz - fz;
+					// The turn is fixed when the glide starts: the heading it has then, and the
+					// shorter way round to the target. Deciding it afresh each frame could flip
+					// the turn mid-glide, and the tapered stem would swap ends on docking.
+					const faA = r.sa + r.w * Math.max(0, tA - ts - Tf);
+					const turn = wrapPi(r.ta - faA);
 					if (u < 1) {
 						// glide in on a shallow arc; the turn starts late and finishes with the glide
 						const arc = Math.sin(Math.PI * s) * (r.r3 - 0.5) * 0.3;
+						const s2 = smooth(u * 1.25 - 0.25);
 						x = fx + ddx * s - ddz * arc;
 						z = fz + ddz * s + ddx * arc;
-						a = fa + wrapPi(r.ta - fa) * smooth(u * 1.25 - 0.25);
+						a = faA + (fa - faA) * (1 - s2) + turn * s2;
 					} else {
-						// docked: a small nudge along the way it came, then it settles
+						// docked: a small nudge along the way it came, easing in so it never jerks
 						dockAge = t - (tA + g);
 						const dl = Math.sqrt(ddx * ddx + ddz * ddz) || 1;
-						const settle = 0.012 * Math.exp(-dockAge * 2.2) * Math.sin(dockAge * 7);
+						const ease = smooth(dockAge / 0.4);
+						const settle = 0.012 * ease * Math.exp(-dockAge * 2.2) * Math.sin(dockAge * 7);
 						x = r.tx + (ddx / dl) * settle;
 						z = r.tz + (ddz / dl) * settle;
-						a = r.ta + 0.02 * Math.exp(-dockAge * 2) * Math.sin(dockAge * 6);
+						a = faA + turn + 0.02 * ease * Math.exp(-dockAge * 2) * Math.sin(dockAge * 6);
 					}
 				}
 			}
 
-			let spd = 0;
-			if (stepDt > 0 && r.px !== undefined && r.pz !== undefined && r.pa !== undefined) {
-				const mx = x - r.px;
-				const mz = z - r.pz;
-				spd = Math.sqrt(mx * mx + mz * mz) / stepDt + (Math.abs(wrapPi(a - r.pa)) * r.hl) / stepDt;
-				spd = Math.max(0, spd - 0.04);
+			// Glide velocity for the wake, smoothed over ~0.3 s whatever the frame rate.
+			if (stepDt > 0 && r.px !== undefined && r.pz !== undefined) {
+				const k = 1 - Math.exp(-stepDt / 0.3);
+				r.svx = (r.svx || 0) + ((x - r.px) / stepDt - (r.svx || 0)) * k;
+				r.svz = (r.svz || 0) + ((z - r.pz) / stepDt - (r.svz || 0)) * k;
 			}
-			r.spd = (r.spd || 0) * 0.85 + spd * 0.15;
 			r.px = x;
 			r.pz = z;
-			r.pa = a;
+			// Idle drift makes no wake: take a dead zone off the speed, keep the heading.
+			const svx = r.svx || 0;
+			const svz = r.svz || 0;
+			const sp = Math.sqrt(svx * svx + svz * svz);
+			const wake = landAge >= 0 && sp > 0.03 ? (sp - 0.03) / sp : 0;
 
 			// Floating stems ride the same swell the water shows (the three long waves in
 			// baseWaves), so neighbours move together and the finished word breathes.
@@ -680,15 +726,18 @@ export function startReeds(canvas: HTMLCanvasElement, opts: ReedsOptions = {}): 
 			data[o + 3] = r.hl * c;
 			data[o2] = tipDepth;
 			data[o2 + 1] = Math.max(age, -5);
-			data[o2 + 2] = r.spd;
+			data[o2 + 2] = sp * wake;
 			data[o2 + 3] = r.seed;
 			data[o3] = Math.tan(th);
 			data[o3 + 1] = landAge;
 			data[o3 + 2] = r.hl;
 			data[o3 + 3] = dockAge;
+			const o4 = (3 * N + i) * 4;
+			data[o4] = svx * wake;
+			data[o4 + 1] = svz * wake;
 		}
 
-		gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N, 3, gl.RGBA, gl.FLOAT, data);
+		gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N, 4, gl.RGBA, gl.FLOAT, data);
 		const aspect = canvas.width / Math.max(1, canvas.height);
 		gl.uniform2f(uRes, canvas.width, canvas.height);
 		gl.uniform1f(uTime, t);
@@ -703,7 +752,7 @@ export function startReeds(canvas: HTMLCanvasElement, opts: ReedsOptions = {}): 
 			t0 = performance.now();
 			touches.fill(0);
 			lastT = -1;
-			for (const r of reeds) r.px = r.pz = r.pa = undefined;
+			for (const r of reeds) r.px = r.pz = r.svx = r.svz = undefined;
 		},
 		destroy: () => {
 			alive = false;
